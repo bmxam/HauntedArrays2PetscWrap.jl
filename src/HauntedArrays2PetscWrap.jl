@@ -1,0 +1,2 @@
+module HauntedArrays2PetscWrap
+end
