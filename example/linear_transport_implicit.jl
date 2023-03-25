@@ -11,7 +11,9 @@ using MPIUtils
 using HauntedArrays
 using OrdinaryDiffEq
 using DiffEqBase
+using LinearSolve
 using LinearAlgebra
+using PetscWrap
 
 const lx = 1.0
 const nx = 3 # on each process
@@ -22,9 +24,52 @@ function DiffEqBase.recursive_length(A::HauntedVector)
 end
 
 #### DEBUG BELOW
-function LinearAlgebra.lu(A::HauntedMatrix{T}, pivot; check) where {T}
-    return LinearAlgebra.lu(parent(A), pivot, check) # this is wrong, only for debugging
+function LinearAlgebra.lu!(A::HauntedMatrix{T}, pivot; check) where {T}
+    println("wrong `lu!` for debug")
+    # don't do anything for now
+    return A
 end
+
+function LinearAlgebra.generic_lufact!(A::HauntedMatrix{T}, pivot; check = true) where {T}
+    println("wrong `generic_lufact!` for debug")
+    # don't do anything for now
+    return A
+end
+
+function LinearAlgebra.ldiv!(x::HauntedVector, A::HauntedMatrix, b::HauntedVector)
+    # DEBUG version !
+    @assert MPI.Comm_size(get_comm(A)) == 1 "invalid ldiv! on nprocs > 1"
+    x .= parent(A) \ parent(b)
+    return x
+end
+
+function Base.convert(PetscVec, x::HauntedVector)
+    y = VecCreate(get_comm(x))
+    VecSetSizes(y, n_own_rows(x), PETSC_DECIDE)
+    error("not finished")
+    VecSetFromOptions(y)
+    VecSetUp(y)
+    return y
+end
+
+# function my_linsolve(A, b, u, p, newA, Pl, Pr, solverdata; verbose = true, kwargs...)
+#     @show typeof(A)
+#     @show typeof(b)
+#     @show fieldnames(typeof(A))
+#     @show A.mass_matrix
+#     @show A.gamma
+#     @show A.J
+#     @show fieldnames(typeof(A.J))
+#     @show A.J.cache1
+#     @show A.J.cache2
+#     @show A.J.autodiff
+#     A = convert(AbstractMatrix, A)
+#     @show typeof(A)
+
+#     _u = parent(A) \ parent(b)
+#     u .= _u
+#     return u
+# end
 #### DEBUG BELOW
 
 MPI.Initialized() || MPI.Init()
@@ -71,6 +116,9 @@ tspan = (0.0, 2.0)
 prob = ODEProblem(f!, q, tspan, p)
 
 # Implicit time integration
+# alg = LinearSolveFunction(my_linsolve)
+# sol = solve(prob, ImplicitEuler(linsolve = alg))
+# sol = solve(prob, ImplicitEuler(precs = DEFAULT_PRECS))
 sol = solve(prob, ImplicitEuler())
 q = sol.u[end]
 
