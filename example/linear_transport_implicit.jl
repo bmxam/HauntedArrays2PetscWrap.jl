@@ -43,13 +43,33 @@ function LinearAlgebra.ldiv!(x::HauntedVector, A::HauntedMatrix, b::HauntedVecto
     return x
 end
 
-function Base.convert(PetscVec, x::HauntedVector)
-    y = VecCreate(get_comm(x))
-    VecSetSizes(y, n_own_rows(x), PETSC_DECIDE)
-    error("not finished")
-    VecSetFromOptions(y)
-    VecSetUp(y)
+function Base.convert(::Type{Vec}, x::HauntedVector)
+    y = create_vector(get_comm(x); nrows_loc = n_own_rows(x), autosetup = true)
+    set_local_to_global!(y, own_to_global(x))
+    set_values!(y, collect(1:n_own_rows(x)), owned_values(x))
     return y
+end
+
+function Base.convert(::Type{Mat}, A::HauntedMatrix)
+
+    _A = parent(A)
+    if _A isa Array
+        ncols_l = size(_A, 2)
+        B = createDense(get_comm(A), n_own_rows(x), ncols_l)
+        setFromOptions(B)
+        setUp(B)
+        set_local_to_global!(B, own_to_global(A), local_to_global(A))
+        icols = collect(1:ncols_l)
+        for (irow, li) in own_to_local_rows(A)
+            set_values!(B, irow, icols, _A[li, :])
+        end
+        error("not finished")
+    else
+        error(
+            "typeof(parent(HauntedMatrix)) = $(typeof(parent(HauntedMatrix))) not handled yet ",
+        )
+    end
+    return B
 end
 
 # function my_linsolve(A, b, u, p, newA, Pl, Pr, solverdata; verbose = true, kwargs...)
