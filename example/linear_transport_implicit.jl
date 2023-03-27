@@ -38,15 +38,35 @@ end
 
 function LinearAlgebra.ldiv!(x::HauntedVector, A::HauntedMatrix, b::HauntedVector)
     # DEBUG version !
-    @assert MPI.Comm_size(get_comm(A)) == 1 "invalid ldiv! on nprocs > 1"
-    x .= parent(A) \ parent(b)
-    return x
+    # @assert MPI.Comm_size(get_comm(A)) == 1 "invalid ldiv! on nprocs > 1"
+    # x .= parent(A) \ parent(b)
+    # return x
+
+    # Convert to PETSc objects
+    _A = convert(Mat, A)
+    _b = convert(Vec, b)
+
+    ksp = create_ksp(_A; autosetup = true)
+    set_from_options!(ksp)
+    set_up!(ksp)
+
+    # Solve the system
+    _x = solve(ksp, _b)
+
+    # Convert `Vec` to Julia `Array` (memory leak here?)
+    # WARNING : is lid2gid respected by `vec2array` ??
+    x .= vec2array(_x)
+    error("wrong, the numbers are not correctly sorted")
+
+    # Free memory
+    destroy!.(_A, _b, _x)
 end
 
 function Base.convert(::Type{Vec}, x::HauntedVector)
     y = create_vector(get_comm(x); nrows_loc = n_own_rows(x), autosetup = true)
     set_local_to_global!(y, own_to_global(x))
     set_values!(y, collect(1:n_own_rows(x)), owned_values(x))
+    assemble!(y)
     return y
 end
 
@@ -63,7 +83,7 @@ function Base.convert(::Type{Mat}, A::HauntedMatrix)
         for (irow, li) in own_to_local_rows(A)
             set_values!(B, irow, icols, _A[li, :])
         end
-        error("not finished")
+        assemble!(B)
     else
         error(
             "typeof(parent(HauntedMatrix)) = $(typeof(parent(HauntedMatrix))) not handled yet ",
