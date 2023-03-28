@@ -37,11 +37,14 @@ function get_updated_petsc_array(A::HauntedMatrix)
 
     # Allocate PetscMat and fill it
     ncols_l = size(_A, 2)
-    B = create_matrix(get_comm(A), n_own_rows(A), ncols_l)
-    setFromOptions(B)
-    setUp(B)
+    B = create_matrix(
+        get_comm(A);
+        nrows_loc = n_own_rows(A),
+        ncols_loc = ncols_l,
+        autosetup = true,
+    )
     for li in own_to_local_rows(A)
-        set_values!(B, lid2pid[li], lid2pid, _A[li, :])
+        set_values!(B, lid2pid[li] .* ones(ncols_l), lid2pid, _A[li, :])
     end
     assemble!(B)
 

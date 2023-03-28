@@ -5,12 +5,12 @@ struct PetscCache{P,I} <: HauntedArrays.AbstractCache where {I<:Integer}
     # Local to PETSc indexing
     lid2pid::Vector{I}
 
-    PetscCache(array, l2p::Vector{I}) where {I<:Integer} = new{typeof(array),I}(a, l2p)
+    PetscCache(a, l2p::Vector{I}) where {I<:Integer} = new{typeof(a),I}(a, l2p)
 end
 
 function HauntedArrays.build_cache(
-    ::Type{PetscCache},
-    exchanger::AbstractExchanger,
+    ::Type{<:PetscCache},
+    exchanger::HauntedArrays.AbstractExchanger,
     lid2gid::Vector{I},
     lid2part::Vector{Int},
     oid2lid::Vector{I},
@@ -18,6 +18,8 @@ function HauntedArrays.build_cache(
     T,
 ) where {I<:Integer}
     comm = get_comm(exchanger)
+
+    PetscInitialized() || PetscInitialize()
 
     # Compute local to petsc numbering
     lid2pid = _compute_lid2pid(exchanger, lid2gid, oid2lid)
@@ -63,7 +65,7 @@ function _build_petsc_array(comm::MPI.Comm, n_own_rows::Int, ndims::Int)
     return array
 end
 
-function copy_cache(cache::PetscCache)
+function HauntedArrays.copy_cache(cache::PetscCache)
     array = duplicate(cache.array)
     return PetscCache(array, cache.lid2pid)
 end

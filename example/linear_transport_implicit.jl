@@ -25,39 +25,7 @@ function DiffEqBase.recursive_length(A::HauntedVector)
 end
 
 #### DEBUG BELOW
-function LinearAlgebra.lu!(A::HauntedMatrix{T}, pivot; check) where {T}
-    println("wrong `lu!` for debug")
-    # don't do anything for now
-    return A
-end
 
-function LinearAlgebra.generic_lufact!(A::HauntedMatrix{T}, pivot; check = true) where {T}
-    println("wrong `generic_lufact!` for debug")
-    # don't do anything for now
-    return A
-end
-
-function LinearAlgebra.ldiv!(x::HauntedVector, A::HauntedMatrix, b::HauntedVector)
-    # DEBUG version !
-    # @assert MPI.Comm_size(get_comm(A)) == 1 "invalid ldiv! on nprocs > 1"
-    # x .= parent(A) \ parent(b)
-    # return x
-
-    # Convert to PETSc objects
-    _A = get_updated_petsc_array(A)
-    _b = get_updated_petsc_array(b)
-
-    ksp = create_ksp(_A; auto_setup = true)
-
-    # Solve the system
-    _x = solve(ksp, _b)
-
-    # Convert `Vec` to Julia `Array` (memory leak here?)
-    x .= vec2array(_x)
-
-    # Free memory (_A and _b may be cached and should not be destroyed here)
-    destroy!.(_x)
-end
 
 # function my_linsolve(A, b, u, p, newA, Pl, Pr, solverdata; verbose = true, kwargs...)
 #     @show typeof(A)

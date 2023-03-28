@@ -1,3 +1,10 @@
+name = "HauntedArrays2PetscWrap"
+uuid = "5aa179f6-1a8e-402c-b434-5ad6c0ea8643"
+authors = ["bmxam <maxime.bouyges@gmail.com>"]
+version = "0.1.0"
+
 [deps]
 HauntedArrays = "88ea1a40-65ed-4bf4-98f2-fb8783b28482"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
 PetscWrap = "5be22e1c-01b5-4697-96eb-ef9ccdc854b8"
