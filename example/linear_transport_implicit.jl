@@ -14,6 +14,7 @@ using DiffEqBase
 using LinearSolve
 using LinearAlgebra
 using PetscWrap
+using HauntedArrays2PetscWrap
 
 const lx = 1.0
 const nx = 3 # on each process
@@ -43,53 +44,19 @@ function LinearAlgebra.ldiv!(x::HauntedVector, A::HauntedMatrix, b::HauntedVecto
     # return x
 
     # Convert to PETSc objects
-    _A = convert(Mat, A)
-    _b = convert(Vec, b)
+    _A = get_updated_petsc_array(A)
+    _b = get_updated_petsc_array(b)
 
-    ksp = create_ksp(_A; autosetup = true)
-    set_from_options!(ksp)
-    set_up!(ksp)
+    ksp = create_ksp(_A; auto_setup = true)
 
     # Solve the system
     _x = solve(ksp, _b)
 
     # Convert `Vec` to Julia `Array` (memory leak here?)
-    # WARNING : is lid2gid respected by `vec2array` ??
     x .= vec2array(_x)
-    error("wrong, the numbers are not correctly sorted")
 
-    # Free memory
-    destroy!.(_A, _b, _x)
-end
-
-function Base.convert(::Type{Vec}, x::HauntedVector)
-    y = create_vector(get_comm(x); nrows_loc = n_own_rows(x), autosetup = true)
-    set_local_to_global!(y, own_to_global(x))
-    set_values!(y, collect(1:n_own_rows(x)), owned_values(x))
-    assemble!(y)
-    return y
-end
-
-function Base.convert(::Type{Mat}, A::HauntedMatrix)
-
-    _A = parent(A)
-    if _A isa Array
-        ncols_l = size(_A, 2)
-        B = createDense(get_comm(A), n_own_rows(x), ncols_l)
-        setFromOptions(B)
-        setUp(B)
-        set_local_to_global!(B, own_to_global(A), local_to_global(A))
-        icols = collect(1:ncols_l)
-        for (irow, li) in own_to_local_rows(A)
-            set_values!(B, irow, icols, _A[li, :])
-        end
-        assemble!(B)
-    else
-        error(
-            "typeof(parent(HauntedMatrix)) = $(typeof(parent(HauntedMatrix))) not handled yet ",
-        )
-    end
-    return B
+    # Free memory (_A and _b may be cached and should not be destroyed here)
+    destroy!.(_x)
 end
 
 # function my_linsolve(A, b, u, p, newA, Pl, Pr, solverdata; verbose = true, kwargs...)
