@@ -3,6 +3,7 @@ using HauntedArrays
 using PetscWrap
 using MPI
 using LinearAlgebra
+using MPIUtils
 
 include("cache.jl")
 export PetscCache

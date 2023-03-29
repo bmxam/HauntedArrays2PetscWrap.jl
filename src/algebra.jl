@@ -19,11 +19,6 @@ function LinearAlgebra.:\(A::HauntedMatrix, b::HauntedVector)
 end
 
 function LinearAlgebra.ldiv!(x::HauntedVector, A::HauntedMatrix, b::HauntedVector)
-    # DEBUG version !
-    # @assert MPI.Comm_size(get_comm(A)) == 1 "invalid ldiv! on nprocs > 1"
-    # x .= parent(A) \ parent(b)
-    # return x
-
     # Convert to PETSc objects
     _A = get_updated_petsc_array(A)
     _b = get_updated_petsc_array(b)
@@ -34,7 +29,7 @@ function LinearAlgebra.ldiv!(x::HauntedVector, A::HauntedMatrix, b::HauntedVecto
     _x = solve(ksp, _b)
 
     # Convert `Vec` to Julia `Array` (memory leak here?)
-    x .= vec2array(_x)
+    x[own_to_local_rows(x)] .= vec2array(_x)
 
     # Free memory (_A and _b may be cached and should not be destroyed here)
     destroy!(_x)

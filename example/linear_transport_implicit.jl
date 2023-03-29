@@ -11,9 +11,6 @@ using MPIUtils
 using HauntedArrays
 using OrdinaryDiffEq
 using DiffEqBase
-using LinearSolve
-using LinearAlgebra
-using PetscWrap
 using HauntedArrays2PetscWrap
 
 const lx = 1.0
@@ -24,28 +21,6 @@ function DiffEqBase.recursive_length(A::HauntedVector)
     MPI.Allreduce(n_own_rows(A), MPI.SUM, get_comm(A))
 end
 
-#### DEBUG BELOW
-
-
-# function my_linsolve(A, b, u, p, newA, Pl, Pr, solverdata; verbose = true, kwargs...)
-#     @show typeof(A)
-#     @show typeof(b)
-#     @show fieldnames(typeof(A))
-#     @show A.mass_matrix
-#     @show A.gamma
-#     @show A.J
-#     @show fieldnames(typeof(A.J))
-#     @show A.J.cache1
-#     @show A.J.cache2
-#     @show A.J.autodiff
-#     A = convert(AbstractMatrix, A)
-#     @show typeof(A)
-
-#     _u = parent(A) \ parent(b)
-#     u .= _u
-#     return u
-# end
-#### DEBUG BELOW
 
 MPI.Initialized() || MPI.Init()
 
@@ -56,22 +31,12 @@ np = MPI.Comm_size(comm)
 mypart = rank + 1
 Δx = lx / (np * nx - 1)
 
-lid2gid = collect((rank * nx + 1):((rank + 1) * nx))
-lid2part = mypart .* ones(Int, nx)
-if mypart != np
-    append!(lid2gid, (rank + 1) * nx + 1)
-    append!(lid2part, mypart + 1)
-end
-if mypart != 1
-    prepend!(lid2gid, rank * nx)
-    prepend!(lid2part, mypart - 1)
-end
+# The "mesh" partitioning
+lid2gid, lid2part = HauntedArrays.generate_1d_partitioning(nx, mypart, np)
 
-@one_at_a_time @show lid2gid
-@one_at_a_time @show lid2part
 
 # Allocate
-q = HauntedVector(comm, lid2gid, lid2part)
+q = HauntedVector(comm, lid2gid, lid2part; cacheType = PetscCache)
 dq = similar(q)
 p = (c = c, Δx = Δx)
 
@@ -89,15 +54,9 @@ end
 
 tspan = (0.0, 2.0)
 prob = ODEProblem(f!, q, tspan, p)
-
-# Implicit time integration
-# alg = LinearSolveFunction(my_linsolve)
-# sol = solve(prob, ImplicitEuler(linsolve = alg))
-# sol = solve(prob, ImplicitEuler(precs = DEFAULT_PRECS))
 sol = solve(prob, ImplicitEuler())
 q = sol.u[end]
 
-update_ghosts!(q)
 @one_at_a_time @show owned_values(q)
 
 isinteractive() || MPI.Finalize()

@@ -5,7 +5,10 @@ struct PetscCache{P,I} <: HauntedArrays.AbstractCache where {I<:Integer}
     # Local to PETSc indexing
     lid2pid::Vector{I}
 
-    PetscCache(a, l2p::Vector{I}) where {I<:Integer} = new{typeof(a),I}(a, l2p)
+    # Total number of rows (= number of cols if matrix)
+    nrows_glob::I
+
+    PetscCache(a, l2p::Vector{I}, n::I) where {I<:Integer} = new{typeof(a),I}(a, l2p, n)
 end
 
 function HauntedArrays.build_cache(
@@ -17,16 +20,22 @@ function HauntedArrays.build_cache(
     ndims::Int,
     T,
 ) where {I<:Integer}
+    # Alias
     comm = get_comm(exchanger)
 
+    # Number of elements handled by each proc
+    n_by_rank = MPI.Allgather(length(oid2lid), comm)
+    nrows_glob = sum(n_by_rank)
+
+    # Init Petsc if needed (should use options here)
     PetscInitialized() || PetscInitialize()
 
     # Compute local to petsc numbering
-    lid2pid = _compute_lid2pid(exchanger, lid2gid, oid2lid)
+    lid2pid = _compute_lid2pid(exchanger, n_by_rank, lid2gid, oid2lid)
 
     array = _build_petsc_array(comm, length(oid2lid), ndims)
 
-    return PetscCache(array, lid2pid)
+    return PetscCache(array, lid2pid, nrows_glob)
 end
 
 """
@@ -34,16 +43,15 @@ local id to petsc id
 """
 function _compute_lid2pid(
     exchanger::HauntedArrays.AbstractExchanger,
+    n_by_rank,
     lid2gid::Vector{I},
     oid2lid::Vector{I},
 ) where {I<:Integer}
     # Alias
-    comm = get_comm(exchanger)
-    rank = MPI.Comm_rank(comm)
+    rank = MPI.Comm_rank(get_comm(exchanger))
 
     # Compute the offset by calculating the number of elements
     # handled by procs with a lower rank
-    n_by_rank = MPI.Allgather(length(oid2lid), comm)
     offset = sum(n_by_rank[1:rank])
 
     # Create an Array whose values will be
@@ -67,7 +75,8 @@ end
 
 function HauntedArrays.copy_cache(cache::PetscCache)
     array = duplicate(cache.array)
-    return PetscCache(array, cache.lid2pid)
+    # @only_root println("copying cache for array with typeof(array) = $(typeof(array))")
+    return PetscCache(array, cache.lid2pid, cache.nrows_glob)
 end
 
 PetscWrap.duplicate(::Nothing) = nothing

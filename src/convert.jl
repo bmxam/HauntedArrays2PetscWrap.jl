@@ -1,12 +1,18 @@
 function get_updated_petsc_array(x::HauntedVector)
     # Use cache to retrieve PetscVec and lid2pid, or recompute it
     cache = get_cache(x)
-    if typeof(cache) == PetscCache
+    if cache isa PetscCache
         lid2pid = cache.lid2pid
         y = cache.array
     else
+        @only_root println(
+            "WARNING : no cache found for HauntedVector in `get_updated_petsc_array`",
+        )
+        n_by_rank = MPI.Allgather(length(x.oid2lid), get_comm(x))
+
         lid2pid = _compute_lid2pid(
             HauntedArrays.get_exchanger(x),
+            n_by_rank,
             local_to_global(x),
             own_to_local(x),
         )
@@ -25,11 +31,20 @@ function get_updated_petsc_array(A::HauntedMatrix)
 
     # Use cache to lid2pid, or recompute it
     cache = get_cache(A)
-    if typeof(cache) == PetscCache
+    if cache isa PetscCache
         lid2pid = cache.lid2pid
+        ncols_g = cache.nrows_glob
     else
+        @only_root println(
+            "WARNING : no cache found for HauntedMatrix in `get_updated_petsc_array`",
+        )
+
+        n_by_rank = MPI.Allgather(length(A.oid2lid), get_comm(A))
+        ncols_g = sum(n_by_rank)
+
         lid2pid = _compute_lid2pid(
             HauntedArrays.get_exchanger(A),
+            n_by_rank,
             local_to_global(A),
             own_to_local(A),
         )
@@ -40,7 +55,7 @@ function get_updated_petsc_array(A::HauntedMatrix)
     B = create_matrix(
         get_comm(A);
         nrows_loc = n_own_rows(A),
-        ncols_loc = ncols_l,
+        ncols_glo = ncols_g,
         autosetup = true,
     )
     for li in own_to_local_rows(A)
