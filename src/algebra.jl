@@ -1,6 +1,8 @@
 # This file is under (heavy) construction
+#-> I will introduce a PetscFactorization <: LinearAlgebra.Factorization
+# later
 
-function LinearAlgebra.lu!(A::HauntedMatrix, pivot; check)
+function LinearAlgebra.lu!(A::HauntedMatrix, pivot; check = true)
     println("wrong `lu!` for debug")
     # don't do anything for now
     return A
@@ -15,6 +17,17 @@ end
 function LinearAlgebra.:\(A::HauntedMatrix, b::HauntedVector)
     x = similar(b)
     ldiv!(x, A, b)
+    return x
+end
+
+function LinearAlgebra.ldiv!(
+    x::HauntedVector,
+    A::LinearAlgebra.Factorization,
+    b::HauntedVector,
+)
+    # function LinearAlgebra.ldiv!(x::HauntedVector, A::LinearAlgebra.LU, b::HauntedVector)
+    # THIS IS A TEMPORARY HACK TO "IGNORE" FACTORIZATION
+    ldiv!(x, A.factors, b)
     return x
 end
 
