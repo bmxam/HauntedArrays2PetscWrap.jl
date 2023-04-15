@@ -5,11 +5,14 @@ using HauntedArrays
 using OrdinaryDiffEq
 using HauntedArrays2PetscWrap
 using LinearAlgebra
+using Symbolics
+using SparseDiffTools
 
 # Settings
 const lx = 1.0
 const nx = 4 # on each process
 const c = 1.0
+const tspan = (0.0, 2.0)
 
 MPI.Initialized() || MPI.Init()
 
@@ -38,9 +41,6 @@ function f!(dq, q, p, t)
     end
 end
 
-tspan = (0.0, 2.0)
-prob = ODEProblem(f!, q, tspan, p)
-
 always_true(args...) = true
 
 # This callback avoids using `update_ghosts!` in `f`, which
@@ -53,12 +53,46 @@ cb_update = DiscreteCallback(
     save_positions = (false, false),
 )
 
-@only_root println("running solve...")
-timestepper = ImplicitEuler(linsolve = PetscFactorization())
-sol = solve(prob, timestepper; callback = CallbackSet(cb_update))
-q = sol.u[end]
 
-@one_at_a_time @show owned_values(q)
+function run_expl()
+    prob = ODEProblem(f!, q, tspan, p)
+    timestepper = Euler()
+    @only_root println("running solve (explicit)...")
+    sol = solve(prob, timestepper; dt = Δx / c, callback = CallbackSet(cb_update))
+    q = sol.u[end]
+    @one_at_a_time @show owned_values(q)
+end
+
+function run_impl_dense()
+    prob = ODEProblem(f!, q, tspan, p)
+    timestepper = ImplicitEuler(linsolve = PetscFactorization())
+    @only_root println("running solve (implicit dense)...")
+    sol = solve(prob, timestepper; callback = CallbackSet(cb_update))
+    q = sol.u[end]
+    @one_at_a_time @show owned_values(q)
+end
+
+function run_impl_sparse(q)
+    input = similar(q)
+    output = similar(q)
+    _f! = (y, x) -> f!(y, x, p, 0.0)
+    sparsity_pattern = Symbolics.jacobian_sparsity(_f!, output, input)
+    display(sparsity_pattern)
+    jac = HauntedMatrix(Float64.(sparsity_pattern), q)
+    display(jac)
+    display(parent(jac))
+    colors = matrix_colors(jac)
+
+    ode = ODEFunction(f!; jac_prototype = jac, colorvec = colors)
+    prob = ODEProblem(ode, q, tspan, p)
+    timestepper = ImplicitEuler(linsolve = PetscFactorization())
+    @only_root println("running solve (implicit sparse)...")
+    sol = solve(prob, timestepper; callback = CallbackSet(cb_update))
+    q = sol.u[end]
+    @one_at_a_time @show owned_values(q)
+end
+
+run_impl_sparse(q)
 
 isinteractive() || MPI.Finalize()
 end
