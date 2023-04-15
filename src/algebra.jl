@@ -25,6 +25,7 @@ function LinearAlgebra.ldiv!(
     A::LinearAlgebra.Factorization,
     b::HauntedVector,
 )
+    println("wrong `LinearAlgebra.ldiv!` for debug (should pass here if using PetscSolver)")
     # function LinearAlgebra.ldiv!(x::HauntedVector, A::LinearAlgebra.LU, b::HauntedVector)
     # THIS IS A TEMPORARY HACK TO "IGNORE" FACTORIZATION
     ldiv!(x, A.factors, b)

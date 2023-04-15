@@ -109,8 +109,6 @@ p = (c = c, Δx = Δx)
 (mypart == 1) && (q[1] = 1.0)
 
 function f!(dq, q, p, t)
-    # @one_at_a_time println("before update")
-    update_ghosts!(q)
     for i in own_to_local(q)
         (local_to_global(q, i) == 1) && continue # boundary condition
         dq[i] = -c / p.Δx * (q[i] - q[i - 1])
@@ -119,10 +117,24 @@ end
 
 tspan = (0.0, 2.0)
 prob = ODEProblem(f!, q, tspan, p)
-# alg = LinearSolveFunction(my_linsolve!)
 alg = MyLUFactorization()
-# sol = solve(prob, ImplicitEuler(linsolve = alg))
-sol = solve(prob, ImplicitEuler())
+
+always_true(args...) = true
+
+# This callback avoids using `update_ghosts!` in `f`, which
+# can cause troubles when dealing with Dual
+cb_update = DiscreteCallback(
+    always_true,
+    integrator -> begin
+        update_ghosts!(integrator.u)
+    end;
+    save_positions = (false, false),
+)
+
+@only_root println("running solve...")
+# timestepper = Euler()
+timestepper = ImplicitEuler(linsolve = alg)
+sol = solve(prob, timestepper; callback = CallbackSet(cb_update))
 # sol = solve(prob, Euler(); dt = Δx / c)
 q = sol.u[end]
 

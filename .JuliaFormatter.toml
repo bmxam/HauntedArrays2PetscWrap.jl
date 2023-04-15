@@ -20,3 +20,11 @@ format_markdown = true
 
 # If true, whitespace is added for binary operations in indices
 whitespace_ops_in_indices = true
+
+# Transforms a short function definition to a long function definition if the short
+# function definition exceeds the maximum margin.
+short_to_long_function_def = true
+
+# Transforms a long function definition to a short function definition if the short
+# function definition does not exceed the maximum margin.
+long_to_short_function_def = true
