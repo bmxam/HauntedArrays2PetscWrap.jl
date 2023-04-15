@@ -4,6 +4,13 @@ using PetscWrap
 using MPI
 using LinearAlgebra
 using MPIUtils
+using SciMLBase
+using DiffEqBase
+using LinearSolve
+
+function DiffEqBase.recursive_length(A::HauntedVector)
+    MPI.Allreduce(n_own_rows(A), MPI.SUM, get_comm(A))
+end
 
 include("cache.jl")
 export PetscCache
@@ -12,5 +19,7 @@ include("convert.jl")
 export get_updated_petsc_array
 
 include("algebra.jl")
+include("solvers.jl")
+export PetscFactorization
 
 end
