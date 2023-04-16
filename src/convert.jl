@@ -64,7 +64,7 @@ function get_updated_petsc_array(A::HauntedMatrix)
     return B
 end
 
-function _fill_petscmat_with_array!(B::Mat, A::HauntedArray{T,2,Array}, lid2pid) where {T}
+function _fill_petscmat_with_array!(B::Mat, A::HauntedArray{T,2,S}, lid2pid) where {T, S<:Matrix}
     _A = parent(A)
     ncols_l = size(_A, 2)
     for li in own_to_local_rows(A)
