@@ -1,4 +1,4 @@
-struct PetscCache{P,I} <: HauntedArrays.AbstractCache where {I<:Integer}
+struct PetscCache{P,I} <: HauntedArrays.AbstractCache
     # Petsc.Vec, Petsc.Mat or Nothing
     array::P
 
@@ -13,13 +13,12 @@ end
 
 function HauntedArrays.build_cache(
     ::Type{<:PetscCache},
+    array::AbstractArray{T,N},
     exchanger::HauntedArrays.AbstractExchanger,
     lid2gid::Vector{I},
     lid2part::Vector{Int},
-    oid2lid::Vector{I},
-    ndims::Int,
-    T,
-) where {I<:Integer}
+    oid2lid::Vector{I}
+) where {T,N,I<:Integer}
     # Alias
     comm = get_comm(exchanger)
 
@@ -33,7 +32,7 @@ function HauntedArrays.build_cache(
     # Compute local to petsc numbering
     lid2pid = _compute_lid2pid(exchanger, n_by_rank, lid2gid, oid2lid)
 
-    array = _build_petsc_array(comm, length(oid2lid), ndims)
+    array = _build_petsc_array(comm, length(oid2lid), N)
 
     return PetscCache(array, lid2pid, nrows_glob)
 end
@@ -68,6 +67,7 @@ function _build_petsc_array(comm::MPI.Comm, n_own_rows::Int, ndims::Int)
     if ndims == 1
         array = create_vector(comm; nrows_loc = n_own_rows, autosetup = true)
     else
+        # todo...
         array = nothing
     end
     return array
@@ -75,7 +75,6 @@ end
 
 function HauntedArrays.copy_cache(cache::PetscCache)
     array = duplicate(cache.array)
-    # @only_root println("copying cache for array with typeof(array) = $(typeof(array))")
     return PetscCache(array, cache.lid2pid, cache.nrows_glob)
 end
 

@@ -1,4 +1,8 @@
-struct PetscFactorization <: LinearSolve.AbstractFactorization end
+struct PetscFactorization <: LinearSolve.AbstractFactorization
+    options
+
+    PetscFactorization(options = Dict()) = new(options)
+end
 
 function LinearSolve.init_cacheval(
     alg::PetscFactorization,
@@ -14,6 +18,7 @@ function LinearSolve.init_cacheval(
     assumptions::LinearSolve.OperatorAssumptions,
 )
     # do nothing for now
+    # TODO : store the PetscMat in the cache
 end
 
 function SciMLBase.solve(cache::LinearSolve.LinearCache, alg::PetscFactorization; kwargs...)

@@ -27,11 +27,6 @@ end
 WIP : use cache to avoid reallocation
 """
 function get_updated_petsc_array(A::HauntedMatrix)
-    # Alias
-    _A = parent(A)
-
-    (_A isa Array) || error("HauntedArray with parent # Array not implemented yet")
-
     # Use cache to lid2pid, or recompute it
     cache = get_cache(A)
     if cache isa PetscCache
@@ -53,13 +48,15 @@ function get_updated_petsc_array(A::HauntedMatrix)
         )
     end
 
-    # Allocate PetscMat and fill it
+    # Allocate PetscMat
     B = create_matrix(
         get_comm(A);
         nrows_loc = n_own_rows(A),
         ncols_glo = ncols_g,
         autosetup = true,
     )
+
+    # fill it
     _fill_petscmat_with_array!(B, A, lid2pid)
 
     assemble!(B)
@@ -71,33 +68,36 @@ function _fill_petscmat_with_array!(B::Mat, A::HauntedArray{T,2,Array}, lid2pid)
     _A = parent(A)
     ncols_l = size(_A, 2)
     for li in own_to_local_rows(A)
-        set_values!(B, lid2pid[li] .* ones(ncols_l), lid2pid, _A[li, :])
+        set_values!(B, lid2pid[li] .* ones(ncols_l), lid2pid, _A[li, :], ADD_VALUES)
     end
 end
 
 """
 TODO:  try to use `set_values!` instead of `set_value!`
 """
-function _fill_petscmat_with_array!(B::Mat, A::HauntedArray{T,2,AbstractSparseArray}, lid2pid) where {T}
+function _fill_petscmat_with_array!(B::Mat, A::HauntedArray{T,2,S}, lid2pid) where {T, S<:AbstractSparseArray}
     _A = parent(A)
 
     # Retrieve CSR information from SparseArray
     _I, _J, _V = findnz(_A)
 
     # Set exact preallocation
-    d_nnz, o_nnz = _preallocation_from_sparse(I, J, A, lid2pid)
+    d_nnz, o_nnz = _preallocation_from_sparse(_I, _J, A, lid2pid)
     preallocate!(B, d_nnz, o_nnz)
 
     # Fill matrix
     for (li, lj, v) in zip(_I, _J, _V)
         owned_by_me(A, li) || continue
-        set_value!(B, lid2pid[li], lid2pid[lj], v, mode = ADD_VALUES)
+        set_value!(B, lid2pid[li], lid2pid[lj], v, ADD_VALUES)
     end
 end
 
 """
 Find number of non-zeros element per diagonal block and off-diagonal block
-(see https://petsc.org/release/docs/manualpages/Mat/MatMPIAIJSetPreallocation.html)
+(see https://petsc.org/release//manualpages/Mat/MatMPIAIJSetPreallocation/)
+
+TODO : see also : https://petsc.org/release//manualpages/Mat/MatMPIAIJSetPreallocationCSR/
+maybe more efficient for SparseArrays
 """
 function _preallocation_from_sparse(
     I,
