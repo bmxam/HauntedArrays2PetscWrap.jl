@@ -49,10 +49,11 @@ function get_updated_petsc_array(A::HauntedMatrix)
     end
 
     # Allocate PetscMat
+    # I don't why I have to set the size like this, but this is the only combination that works
     B = create_matrix(
         get_comm(A);
         nrows_loc = n_own_rows(A),
-        ncols_glo = ncols_g,
+        ncols_loc = n_own_rows(A),
         autosetup = true,
     )
 

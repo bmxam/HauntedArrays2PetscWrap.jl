@@ -5,7 +5,7 @@ function LinearAlgebra.ldiv!(x::HauntedVector, A::HauntedMatrix, b::HauntedVecto
     _A = get_updated_petsc_array(A)
     _b = get_updated_petsc_array(b)
 
-    ksp = create_ksp(_A; autosetup = true)
+    ksp = create_ksp(_A; autosetup=true)
 
     # Solve the system
     _x = PetscWrap.solve(ksp, _b)
