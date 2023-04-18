@@ -16,9 +16,6 @@ end
 include("cache.jl")
 export PetscCache
 
-include("convert.jl")
-export get_updated_petsc_array
-
 include("algebra.jl")
 include("solvers.jl")
 export PetscFactorization
