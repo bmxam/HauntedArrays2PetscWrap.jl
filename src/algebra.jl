@@ -18,7 +18,7 @@ function LinearAlgebra.ldiv!(x::HauntedVector, A::HauntedMatrix, b::HauntedVecto
 
     # Free memory (to be improved)
     # release_cache(get_cache(x); free = true)
-    destroy!(_x)
+    # destroy!(_x)
 
     if get_cache(A) isa PetscCache
         zeroEntries(_A)
