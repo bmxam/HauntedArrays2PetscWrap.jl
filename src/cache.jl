@@ -148,7 +148,7 @@ TODO : for matrix, use cache to avoid reallocation
 function get_updated_petsc_array(x::HauntedVector)
     cache = get_cache(x)
     if !(cache isa PetscCache)
-        comm = get_comm(A)
+        comm = get_comm(x)
         @only_root println(
             "WARNING : no cache found for HauntedVector in `get_updated_petsc_array`",
         ) comm
@@ -201,13 +201,11 @@ end
 Return the Petsc vector that is already allocated. Warning : the returned
 vector does NOT correspond to `x` (use get_updated_petsc_array for this).
 """
-function get_cached_vector(x::HauntedVector)
+function get_petsc_array(x::HauntedArray)
     cache = get_cache(x)
     if !(cache isa PetscCache)
         comm = get_comm(A)
-        @only_root println(
-            "WARNING : no cache found for HauntedVector in `get_updated_petsc_array`",
-        ) comm
+        @only_root println("WARNING : no cache found for HauntedArray in `get_petsc_array`") comm
         cache = HauntedArrays.build_cache(
             PetscCache,
             parent(x),
