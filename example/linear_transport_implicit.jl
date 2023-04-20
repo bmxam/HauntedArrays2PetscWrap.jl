@@ -93,10 +93,7 @@ function run_impl_sparse()
 end
 
 run_expl()
-# finalize(q.cache.array)
-finalize_petsc()
-# run_impl_dense(q)
-# run_impl_sparse(q)
+run_impl_dense()
+run_impl_sparse()
 
-# isinteractive() || MPI.Finalize()
 end
