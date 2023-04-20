@@ -28,8 +28,6 @@ mypart = rank + 1
 lid2gid, lid2part = HauntedArrays.generate_1d_partitioning(nx, mypart, np)
 
 # Allocate
-q = HauntedVector(comm, lid2gid, lid2part; cacheType = PetscCache)
-dq = similar(q)
 p = (c = c, Δx = Δx, α = α)
 
 function f!(dq, q, p, t)
@@ -56,7 +54,8 @@ cb_update = DiscreteCallback(
 )
 
 
-function run_expl(q)
+function run_expl()
+    q = HauntedVector(comm, lid2gid, lid2part; cacheType = PetscCache)
     prob = ODEProblem(f!, q, tspan, p)
     timestepper = Euler()
     @only_root println("running solve (explicit)...")
@@ -65,7 +64,8 @@ function run_expl(q)
     @one_at_a_time @show owned_values(q)
 end
 
-function run_impl_dense(q)
+function run_impl_dense()
+    q = HauntedVector(comm, lid2gid, lid2part; cacheType = PetscCache)
     prob = ODEProblem(f!, q, tspan, p)
     timestepper = ImplicitEuler(linsolve = PetscFactorization())
     @only_root println("running solve (implicit dense)...")
@@ -74,7 +74,8 @@ function run_impl_dense(q)
     @one_at_a_time @show owned_values(q)
 end
 
-function run_impl_sparse(q)
+function run_impl_sparse()
+    q = HauntedVector(comm, lid2gid, lid2part; cacheType = PetscCache)
     input = similar(q)
     output = similar(q)
     _f! = (y, x) -> f!(y, x, p, 0.0)
@@ -91,9 +92,11 @@ function run_impl_sparse(q)
     @one_at_a_time @show owned_values(q)
 end
 
-run_expl(q)
-run_impl_dense(q)
-run_impl_sparse(q)
+run_expl()
+# finalize(q.cache.array)
+finalize_petsc()
+# run_impl_dense(q)
+# run_impl_sparse(q)
 
-isinteractive() || MPI.Finalize()
+# isinteractive() || MPI.Finalize()
 end
