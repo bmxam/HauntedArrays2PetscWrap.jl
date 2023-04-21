@@ -66,7 +66,7 @@ end
 
 function _build_petsc_array(
     comm::MPI.Comm,
-    ::Vector{T},
+    ::AbstractVector{T},
     lid2part,
     oid2lid,
     lid2pid,
