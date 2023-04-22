@@ -1,5 +1,10 @@
 # This file is under (heavy) construction
 
+function LinearAlgebra.:(\)(A::HauntedMatrix, b::HauntedVector)
+    x = similar(b)
+    return ldiv!(x, A, b)
+end
+
 function LinearAlgebra.ldiv!(x::HauntedVector, A::HauntedMatrix, b::HauntedVector)
     # Convert to PETSc objects
     _A = get_updated_petsc_array(A)

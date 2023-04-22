@@ -28,7 +28,7 @@ function test1()
     x = HauntedVector(comm, lid2gid, lid2part; cacheType = PetscCache)
     x .= rand(length(lid2gid))
 
-    _x = get_updated_petsc_array(x)
+    _x = HauntedArrays2PetscWrap.get_updated_petsc_array(x)
     y = vec2array(_x)
 
     @one_at_a_time begin
@@ -37,7 +37,5 @@ function test1()
 end
 
 test1()
-
-isinteractive() || MPI.Finalize()
 
 end

@@ -21,7 +21,7 @@ function test1()
     x = HauntedVector(comm, lid2gid, lid2part; cacheType = PetscCache)
     x .= [6.0, 5.0, 4.0, 3.0, 2.0, 1.0]
 
-    _x = get_updated_petsc_array(x)
+    _x = HauntedArrays2PetscWrap.get_updated_petsc_array(x)
 
     y = vec2array(_x)
 
@@ -48,5 +48,4 @@ end
 test1()
 test_ldiv()
 
-isinteractive() || MPI.Finalize()
 end
