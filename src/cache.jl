@@ -1,4 +1,4 @@
-struct PetscCache{P,I} <: HauntedArrays.AbstractCache where {I<:Integer}
+struct PetscCache{P,I} <: HauntedArrays.AbstractCache
     # Petsc.Vec, Petsc.Mat or Nothing
     array::P
 
@@ -6,6 +6,7 @@ struct PetscCache{P,I} <: HauntedArrays.AbstractCache where {I<:Integer}
     lid2pid::Vector{I}
 
     # Total number of rows (= number of cols if matrix)
+    # no needed any more, to be removed
     nrows_glob::I
 
     PetscCache(a, l2p::Vector{I}, n::I) where {I<:Integer} = new{typeof(a),I}(a, l2p, n)
@@ -13,13 +14,12 @@ end
 
 function HauntedArrays.build_cache(
     ::Type{<:PetscCache},
+    array::AbstractArray{T,N},
     exchanger::HauntedArrays.AbstractExchanger,
     lid2gid::Vector{I},
     lid2part::Vector{Int},
     oid2lid::Vector{I},
-    ndims::Int,
-    T,
-) where {I<:Integer}
+) where {T,N,I<:Integer}
     # Alias
     comm = get_comm(exchanger)
 
@@ -33,9 +33,10 @@ function HauntedArrays.build_cache(
     # Compute local to petsc numbering
     lid2pid = _compute_lid2pid(exchanger, n_by_rank, lid2gid, oid2lid)
 
-    array = _build_petsc_array(comm, length(oid2lid), ndims)
+    # Build Petsc Array
+    _array = _build_petsc_array(comm, array, lid2part, oid2lid, lid2pid)
 
-    return PetscCache(array, lid2pid, nrows_glob)
+    return PetscCache(_array, lid2pid, nrows_glob)
 end
 
 """
@@ -63,20 +64,224 @@ function _compute_lid2pid(
     return lid2pid
 end
 
-function _build_petsc_array(comm::MPI.Comm, n_own_rows::Int, ndims::Int)
-    # Allocate PETSc array
-    if ndims == 1
-        array = create_vector(comm; nrows_loc = n_own_rows, autosetup = true)
-    else
-        array = nothing
-    end
+function _build_petsc_array(
+    comm::MPI.Comm,
+    ::AbstractVector{T},
+    lid2part,
+    oid2lid,
+    lid2pid,
+) where {T}
+    n_own_rows = length(oid2lid)
+    return create_vector(comm; nrows_loc = n_own_rows, autosetup = true)
+end
+
+function _build_petsc_array(
+    comm::MPI.Comm,
+    ::Matrix{T},
+    lid2part,
+    oid2lid,
+    lid2pid,
+) where {T}
+    n_own_rows = length(oid2lid)
+
+    # Allocate PetscMat
+    # I don't why I have to set the size like this, but this is the only combination that works
+    # TODO : CREATE DENSE MATRIX INSTEAD OF SPARSE
+    return create_matrix(
+        comm;
+        nrows_loc = n_own_rows,
+        ncols_loc = n_own_rows,
+        autosetup = true,
+    )
+end
+
+function _build_petsc_array(
+    comm::MPI.Comm,
+    A::AbstractSparseArray{T},
+    lid2part,
+    oid2lid,
+    lid2pid,
+) where {T}
+    n_own_rows = length(oid2lid)
+
+    # Allocate PetscMat
+    # I don't why I have to set the size like this, but this is the only combination that works
+    array = create_matrix(
+        comm;
+        nrows_loc = n_own_rows,
+        ncols_loc = n_own_rows,
+        autosetup = true,
+    )
+
+    # Retrieve CSR information from SparseArray
+    _I, _J, _ = findnz(A)
+
+    # Set exact preallocation
+    my_part = MPI.Comm_rank(comm) + 1
+    owned_by_me = [part == my_part for part in lid2part]
+    d_nnz, o_nnz = _preallocation_from_sparse(_I, _J, owned_by_me, oid2lid, lid2pid)
+    preallocate!(array, d_nnz, o_nnz)
     return array
 end
 
 function HauntedArrays.copy_cache(cache::PetscCache)
-    array = duplicate(cache.array)
-    # @only_root println("copying cache for array with typeof(array) = $(typeof(array))")
+    if cache.array isa Vec
+        array = duplicate(cache.array)
+    elseif cache.array isa Mat
+        array = duplicate(cache.array, MAT_DO_NOT_COPY_VALUES)
+    else
+        error("cached array must be of type Vec or Mat")
+    end
     return PetscCache(array, cache.lid2pid, cache.nrows_glob)
 end
 
 PetscWrap.duplicate(::Nothing) = nothing
+
+"""
+    get_updated_petsc_array(x::HauntedVector)
+    get_updated_petsc_array(A::HauntedMatrix)
+
+Return a Petsc vector/matrix with the values of the input HauntedVector/HauntedMatrix
+
+TODO : for matrix, use cache to avoid reallocation
+"""
+function get_updated_petsc_array(x::HauntedVector)
+    cache = get_cache(x)
+    if !(cache isa PetscCache)
+        comm = get_comm(x)
+        @only_root println(
+            "WARNING : no cache found for HauntedVector in `get_updated_petsc_array`",
+        ) comm
+        cache = HauntedArrays.build_cache(
+            PetscCache,
+            parent(x),
+            HauntedArrays.get_exchanger(x),
+            local_to_global(x),
+            local_to_part(x),
+            own_to_local(x),
+        )
+    end
+
+    lid2pid = cache.lid2pid
+    y = cache.array
+    set_values!(y, lid2pid[own_to_local(x)], owned_values(x))
+    assemble!(y)
+    return y
+end
+
+function get_updated_petsc_array(A::HauntedMatrix)
+    cache = get_cache(A)
+    if !(cache isa PetscCache)
+        comm = get_comm(A)
+        @only_root println(
+            "WARNING : no cache found for HauntedMatrix in `get_updated_petsc_array`",
+        ) comm
+        cache = HauntedArrays.build_cache(
+            PetscCache,
+            parent(A),
+            HauntedArrays.get_exchanger(A),
+            local_to_global(A),
+            local_to_part(A),
+            own_to_local(A),
+        )
+    end
+
+    B = cache.array
+    lid2pid = cache.lid2pid
+
+    # fill it
+    _fill_petscmat_with_array!(B, A, lid2pid)
+
+    assemble!(B)
+
+    return B
+end
+
+"""
+Return the Petsc vector that is already allocated. Warning : the returned
+vector does NOT correspond to `x` (use get_updated_petsc_array for this).
+"""
+function get_petsc_array(x::HauntedArray)
+    cache = get_cache(x)
+    if !(cache isa PetscCache)
+        comm = get_comm(A)
+        @only_root println("WARNING : no cache found for HauntedArray in `get_petsc_array`") comm
+        cache = HauntedArrays.build_cache(
+            PetscCache,
+            parent(x),
+            HauntedArrays.get_exchanger(x),
+            local_to_global(x),
+            local_to_part(x),
+            own_to_local(x),
+        )
+    end
+
+    return cache.array
+end
+
+function _fill_petscmat_with_array!(
+    B::Mat,
+    A::HauntedArray{T,2,S},
+    lid2pid,
+) where {T,S<:Matrix}
+    _A = parent(A)
+    ncols_l = size(_A, 2)
+    for li in own_to_local_rows(A)
+        set_values!(B, lid2pid[li] .* ones(ncols_l), lid2pid, _A[li, :], ADD_VALUES)
+    end
+end
+
+"""
+TODO:  try to use `set_values!` instead of `set_value!`
+"""
+function _fill_petscmat_with_array!(
+    B::Mat,
+    A::HauntedArray{T,2,S},
+    lid2pid,
+) where {T,S<:AbstractSparseArray}
+    # Retrieve CSR information from SparseArray
+    _I, _J, _V = findnz(parent(A))
+
+    # Fill matrix
+    for (li, lj, v) in zip(_I, _J, _V)
+        owned_by_me(A, li) || continue
+        set_value!(B, lid2pid[li], lid2pid[lj], v, ADD_VALUES)
+    end
+end
+
+"""
+Find number of non-zeros element per diagonal block and off-diagonal block
+(see https://petsc.org/release//manualpages/Mat/MatMPIAIJSetPreallocation/)
+
+TODO : see also : https://petsc.org/release//manualpages/Mat/MatMPIAIJSetPreallocationCSR/
+maybe more efficient for SparseArrays
+"""
+function _preallocation_from_sparse(I, J, owned_by_me::Vector{Bool}, oid2lid, lid2pid)
+    # Allocate
+    nrows = length(oid2lid)
+    d_nnz = zeros(Int, nrows)
+    o_nnz = zeros(Int, nrows)
+
+    iglob_min, iglob_max = extrema(view(lid2pid, oid2lid))
+
+    # Search for non-zeros
+    for (li, lj) in zip(I, J)
+        # Check that the row is handled by the local processor
+        owned_by_me[li] || continue
+
+        # Global Petsc row number
+        iglob = lid2pid[li]
+
+        # Look if the column belongs to a diagonal block or not
+        # Rq: `iglob - iglob_min + 1` and not `iloc` because the ghost
+        # dofs are not necessarily at the end, they can be any where in local
+        # numbering...
+        jglob = lid2pid[lj]
+        if (iglob_min <= jglob <= iglob_max)
+            d_nnz[iglob - iglob_min + 1] += 1
+        else
+            o_nnz[iglob - iglob_min + 1] += 1
+        end
+    end
+    return d_nnz, o_nnz
+end

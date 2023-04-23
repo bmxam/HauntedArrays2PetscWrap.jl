@@ -7,16 +7,18 @@ using MPIUtils
 using SciMLBase
 using DiffEqBase
 using LinearSolve
+using SparseArrays
 
 function DiffEqBase.recursive_length(A::HauntedVector)
     MPI.Allreduce(n_own_rows(A), MPI.SUM, get_comm(A))
 end
 
+const init_petsc = PetscInitialize
+const finalize_petsc = PetscFinalize
+export init_petsc, finalize_petsc
+
 include("cache.jl")
 export PetscCache
-
-include("convert.jl")
-export get_updated_petsc_array
 
 include("algebra.jl")
 include("solvers.jl")
