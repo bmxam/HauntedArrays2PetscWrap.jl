@@ -42,15 +42,10 @@ function LinearAlgebra.ldiv!(x::HauntedVector, ksp::KSP, b::HauntedVector)
 
     # Solve the system
     _x = PetscWrap.solve(ksp, _b)
-    # PetscWrap.solve(ksp, _b, _x)
+    # PetscWrap.solve(ksp, _b, _x) # TODO : why is this solution not used?
 
-    # Convert `Vec` to Julia `Array` (memory leak here?)
-    # TODO : implement the version with a loop and VecGetValues
-    x[own_to_local_rows(x)] .= vec2array(_x)
-
-    # Free memory (to be improved)
-    # release_cache(get_cache(x); free = true)
-    # destroy!(_x)
+    # Update HauntedVector `x` with values of Petsc Vec `_x`
+    update!(x, _x)
 
     if !(get_cache(b) isa PetscCache)
         destroy!(_b)

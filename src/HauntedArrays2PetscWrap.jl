@@ -17,6 +17,8 @@ const init_petsc = PetscInitialize
 const finalize_petsc = PetscFinalize
 export init_petsc, finalize_petsc
 
+include("utils.jl")
+
 include("cache.jl")
 export PetscCache
 

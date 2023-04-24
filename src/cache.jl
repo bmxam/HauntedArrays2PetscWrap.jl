@@ -3,13 +3,23 @@ struct PetscCache{P,I} <: HauntedArrays.AbstractCache
     array::P
 
     # Local to PETSc indexing
-    lid2pid::Vector{I}
+    lid2pid::Vector{PetscInt}
+
+    # own to PETSc indexing (0-based for petsc)
+    oid2pid0::Vector{PetscInt}
 
     # Total number of rows (= number of cols if matrix)
     # no needed any more, to be removed
     nrows_glob::I
 
-    PetscCache(a, l2p::Vector{I}, n::I) where {I<:Integer} = new{typeof(a),I}(a, l2p, n)
+    function PetscCache(
+        a,
+        l2p::Vector{PetscInt},
+        o2p::Vector{PetscInt},
+        n::I,
+    ) where {I<:Integer}
+        new{typeof(a),I}(a, l2p, o2p, n)
+    end
 end
 
 function HauntedArrays.build_cache(
@@ -32,11 +42,12 @@ function HauntedArrays.build_cache(
 
     # Compute local to petsc numbering
     lid2pid = _compute_lid2pid(exchanger, n_by_rank, lid2gid, oid2lid)
+    oid2pid0 = lid2gid[oid2lid] .- 1 # allocation is wanted
 
     # Build Petsc Array
     _array = _build_petsc_array(comm, array, lid2part, oid2lid, lid2pid)
 
-    return PetscCache(_array, lid2pid, nrows_glob)
+    return PetscCache(_array, PetscInt.(lid2pid), PetscInt.(oid2pid0), nrows_glob)
 end
 
 """
@@ -132,7 +143,7 @@ function HauntedArrays.copy_cache(cache::PetscCache)
     else
         error("cached array must be of type Vec or Mat")
     end
-    return PetscCache(array, cache.lid2pid, cache.nrows_glob)
+    return PetscCache(array, cache.lid2pid, cache.oid2pid0, cache.nrows_glob)
 end
 
 PetscWrap.duplicate(::Nothing) = nothing
@@ -141,7 +152,7 @@ PetscWrap.duplicate(::Nothing) = nothing
     get_updated_petsc_array(x::HauntedVector)
     get_updated_petsc_array(A::HauntedMatrix)
 
-Return a Petsc vector/matrix with the values of the input HauntedVector/HauntedMatrix
+Return a cached Petsc vector/matrix with the values of the input HauntedVector/HauntedMatrix
 
 TODO : for matrix, use cache to avoid reallocation
 """
@@ -162,11 +173,8 @@ function get_updated_petsc_array(x::HauntedVector)
         )
     end
 
-    lid2pid = cache.lid2pid
     y = cache.array
-    zeroEntries(y)
-    set_values!(y, lid2pid[own_to_local(x)], owned_values(x))
-    assemble!(y)
+    update!(y, x, cache.oid2pid0)
     return y
 end
 
@@ -236,6 +244,14 @@ end
 
 """
 TODO:  try to use `set_values!` instead of `set_value!`
+
+Need to test:
+https://petsc.org/release/manualpages/Mat/MatSetPreallocationCOO/
+https://petsc.org/release/manualpages/Mat/MatSetValuesCOO/
+
+or
+
+https://petsc.org/release/manualpages/Mat/MatSetValues/
 """
 function _fill_petscmat_with_array!(
     B::Mat,
