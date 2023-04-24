@@ -164,6 +164,7 @@ function get_updated_petsc_array(x::HauntedVector)
 
     lid2pid = cache.lid2pid
     y = cache.array
+    zeroEntries(y)
     set_values!(y, lid2pid[own_to_local(x)], owned_values(x))
     assemble!(y)
     return y
@@ -188,6 +189,8 @@ function get_updated_petsc_array(A::HauntedMatrix)
 
     B = cache.array
     lid2pid = cache.lid2pid
+
+    zeroEntries(B)
 
     # fill it
     _fill_petscmat_with_array!(B, A, lid2pid)
