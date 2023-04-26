@@ -8,17 +8,21 @@ struct PetscCache{P,I} <: HauntedArrays.AbstractCache
     # own to PETSc indexing (0-based for petsc)
     oid2pid0::Vector{PetscInt}
 
+    # Index of owned values in I, J, V (only for sparse matrices)
+    coo_mask::Vector{I}
+
     # Total number of rows (= number of cols if matrix)
-    # no needed any more, to be removed
+    # not needed any more, to be removed
     nrows_glob::I
 
     function PetscCache(
         a,
         l2p::Vector{PetscInt},
         o2p::Vector{PetscInt},
+        mask::Vector{I},
         n::I,
     ) where {I<:Integer}
-        new{typeof(a),I}(a, l2p, o2p, n)
+        new{typeof(a),I}(a, l2p, o2p, mask, n)
     end
 end
 
@@ -32,6 +36,7 @@ function HauntedArrays.build_cache(
 ) where {T,N,I<:Integer}
     # Alias
     comm = get_comm(exchanger)
+    my_part = MPI.Comm_rank(comm) + 1
 
     # Number of elements handled by each proc
     n_by_rank = MPI.Allgather(length(oid2lid), comm)
@@ -44,14 +49,24 @@ function HauntedArrays.build_cache(
     lid2pid = _compute_lid2pid(exchanger, n_by_rank, lid2gid, oid2lid)
     oid2pid0 = lid2gid[oid2lid] .- 1 # allocation is wanted
 
+    # Compute coo mask
+    coo_mask = Int[]
+    if array isa AbstractSparseMatrix
+        _I, _, _ = findnz(array)
+        sizehint!(coo_mask, length(_I))
+        for (k, li) in enumerate(_I)
+            (lid2part[li] == my_part) && push!(coo_mask, k)
+        end
+    end
+
     # Build Petsc Array
     _array = _build_petsc_array(comm, array, lid2part, oid2lid, lid2pid)
 
-    return PetscCache(_array, PetscInt.(lid2pid), PetscInt.(oid2pid0), nrows_glob)
+    return PetscCache(_array, PetscInt.(lid2pid), PetscInt.(oid2pid0), coo_mask, nrows_glob)
 end
 
 """
-local id to petsc id
+local id to petsc id. PETSc id is 1-based at this step
 """
 function _compute_lid2pid(
     exchanger::HauntedArrays.AbstractExchanger,
@@ -97,7 +112,7 @@ function _build_petsc_array(
 
     # Allocate PetscMat
     # I don't why I have to set the size like this, but this is the only combination that works
-    # TODO : CREATE DENSE MATRIX INSTEAD OF SPARSE
+    # TODO : CREATE DENSE MATRIX INSTEAD OF SPARSE WHEN NECESSARY
     return create_matrix(
         comm;
         nrows_loc = n_own_rows,
@@ -124,14 +139,30 @@ function _build_petsc_array(
         autosetup = true,
     )
 
-    # Retrieve CSR information from SparseArray
-    _I, _J, _ = findnz(A)
-
     # Set exact preallocation
+    _I, _J, _ = findnz(A)
     my_part = MPI.Comm_rank(comm) + 1
     owned_by_me = [part == my_part for part in lid2part]
-    d_nnz, o_nnz = _preallocation_from_sparse(_I, _J, owned_by_me, oid2lid, lid2pid)
-    preallocate!(array, d_nnz, o_nnz)
+
+    #- CSR version
+    # d_nnz, o_nnz = _preallocation_from_sparse(_I, _J, owned_by_me, oid2lid, lid2pid)
+    # preallocate!(array, d_nnz, o_nnz)
+
+    #- COO version
+    coo_I = PetscInt[]
+    coo_J = PetscInt[]
+    sizehint!(coo_I, length(_I))
+    sizehint!(coo_J, length(_J))
+    for (li, lj) in zip(_I, _J)
+        owned_by_me[li] || continue
+        push!(coo_I, lid2pid[li] - 1)
+        push!(coo_J, lid2pid[lj] - 1)
+    end
+    setPreallocationCOO(array, length(coo_I), coo_I, coo_J)
+    @show coo_I
+    @show coo_J
+    @show length(coo_I)
+
     return array
 end
 
@@ -143,7 +174,13 @@ function HauntedArrays.copy_cache(cache::PetscCache)
     else
         error("cached array must be of type Vec or Mat")
     end
-    return PetscCache(array, cache.lid2pid, cache.oid2pid0, cache.nrows_glob)
+    return PetscCache(
+        array,
+        cache.lid2pid,
+        cache.oid2pid0,
+        cache.coo_mask,
+        cache.nrows_glob,
+    )
 end
 
 PetscWrap.duplicate(::Nothing) = nothing
@@ -197,13 +234,11 @@ function get_updated_petsc_array(A::HauntedMatrix)
 
     B = cache.array
     lid2pid = cache.lid2pid
+    coo_mask = cache.coo_mask
 
-    zeroEntries(B)
-
-    # fill it
-    _fill_petscmat_with_array!(B, A, lid2pid)
-
-    assemble!(B)
+    # zeroEntries(B) # this should not be necessary since we fill all values
+    # v1_update!(B, A, lid2pid)
+    update!(B, A, coo_mask)
 
     return B
 end
@@ -230,50 +265,9 @@ function get_petsc_array(x::HauntedArray)
     return cache.array
 end
 
-function _fill_petscmat_with_array!(
-    B::Mat,
-    A::HauntedArray{T,2,S},
-    lid2pid,
-) where {T,S<:Matrix}
-    _A = parent(A)
-    ncols_l = size(_A, 2)
-    for li in own_to_local_rows(A)
-        set_values!(B, lid2pid[li] .* ones(ncols_l), lid2pid, _A[li, :], ADD_VALUES)
-    end
-end
-
-"""
-TODO:  try to use `set_values!` instead of `set_value!`
-
-Need to test:
-https://petsc.org/release/manualpages/Mat/MatSetPreallocationCOO/
-https://petsc.org/release/manualpages/Mat/MatSetValuesCOO/
-
-or
-
-https://petsc.org/release/manualpages/Mat/MatSetValues/
-"""
-function _fill_petscmat_with_array!(
-    B::Mat,
-    A::HauntedArray{T,2,S},
-    lid2pid,
-) where {T,S<:AbstractSparseArray}
-    # Retrieve CSR information from SparseArray
-    _I, _J, _V = findnz(parent(A))
-
-    # Fill matrix
-    for (li, lj, v) in zip(_I, _J, _V)
-        owned_by_me(A, li) || continue
-        set_value!(B, lid2pid[li], lid2pid[lj], v, ADD_VALUES)
-    end
-end
-
 """
 Find number of non-zeros element per diagonal block and off-diagonal block
 (see https://petsc.org/release//manualpages/Mat/MatMPIAIJSetPreallocation/)
-
-TODO : see also : https://petsc.org/release//manualpages/Mat/MatMPIAIJSetPreallocationCSR/
-maybe more efficient for SparseArrays
 """
 function _preallocation_from_sparse(I, J, owned_by_me::Vector{Bool}, oid2lid, lid2pid)
     # Allocate

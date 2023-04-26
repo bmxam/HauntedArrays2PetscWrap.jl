@@ -22,7 +22,15 @@ function update!(y::HauntedVector, x::Vec)
 end
 
 """
-Update Petsc Vec with values of HauntedVector
+    update!(y::Vec, x::HauntedVector, oid2pid0::Vector{PetscInt})
+    update!(y::Mat, x::HauntedArray{T,2,S}, lid2pid) where {T,S<:Matrix}
+    update!(
+        y::Mat,
+        x::HauntedArray{T,2,S},
+        coo_mask::Vector{I},
+    ) where {T,S<:AbstractSparseArray,I}
+
+Update Petsc Vec with values of HauntedArray
 
 `oid2pid0` is the HauntedVector owned indices to Petsc global indices (0-based for Petsc)
 
@@ -30,5 +38,50 @@ Benchmarked as the fastest solution to achieve this.
 """
 function update!(y::Vec, x::HauntedVector, oid2pid0::Vector{PetscInt})
     setValues(y, oid2pid0, owned_values(x), INSERT_VALUES)
+    assemble!(y)
+end
+
+function update!(y::Mat, x::HauntedArray{T,2,S}, lid2pid) where {T,S<:Matrix}
+    _x = parent(x)
+    ncols_l = size(_x, 2)
+    for li in own_to_local_rows(x)
+        set_values!(y, lid2pid[li] .* ones(ncols_l), lid2pid, _x[li, :], ADD_VALUES)
+    end
+    assemble!(y)
+end
+
+function update!(
+    y::Mat,
+    x::HauntedArray{T,2,S},
+    coo_mask::Vector{I},
+) where {T,S<:AbstractSparseArray,I}
+    println("entry update!")
+    _, _, _V = findnz(parent(x))
+    display(parent(x))
+    display(_V)
+    println("1")
+    @show coo_mask
+    println("1.1")
+    @show _V[coo_mask]
+    println("1.2")
+    setValuesCOO(y, _V[coo_mask], INSERT_VALUES)
+    println("2")
+    assemble!(y)
+    println("sortie update!")
+end
+
+function v1_update!(
+    y::Mat,
+    x::HauntedArray{T,2,S},
+    lid2pid,
+) where {T,S<:AbstractSparseArray}
+    # Retrieve CSR information from SparseArray
+    _I, _J, _V = findnz(parent(x))
+
+    # Fill matrix
+    for (li, lj, v) in zip(_I, _J, _V)
+        owned_by_me(x, li) || continue
+        set_value!(y, lid2pid[li], lid2pid[lj], v, ADD_VALUES)
+    end
     assemble!(y)
 end
