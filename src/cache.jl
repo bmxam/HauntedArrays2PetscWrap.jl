@@ -8,21 +8,28 @@ struct PetscCache{P,I} <: HauntedArrays.AbstractCache
     # own to PETSc indexing (0-based for petsc)
     oid2pid0::Vector{PetscInt}
 
+    # Use CSR or COO? -> if we keep this, use Trait or type param
+    CSR::Bool
+
     # Index of owned values in I, J, V (only for sparse matrices)
     coo_mask::Vector{I}
 
+    coo_I0::Vector{PetscInt} # 0-based
+    coo_J0::Vector{PetscInt} # 0-based
+
     # Total number of rows (= number of cols if matrix)
     # not needed any more, to be removed
-    nrows_glob::I
+    # nrows_glob::I
 
     function PetscCache(
         a,
         l2p::Vector{PetscInt},
         o2p::Vector{PetscInt},
+        CSR::Bool,
         mask::Vector{I},
-        n::I,
+        coo_I0::Vector{PetscInt}coo_J0::Vector{PetscInt},
     ) where {I<:Integer}
-        new{typeof(a),I}(a, l2p, o2p, mask, n)
+        new{typeof(a),I}(a, l2p, o2p, CSR, mask, coo_I0, coo_J0)
     end
 end
 
@@ -32,15 +39,19 @@ function HauntedArrays.build_cache(
     exchanger::HauntedArrays.AbstractExchanger,
     lid2gid::Vector{I},
     lid2part::Vector{Int},
-    oid2lid::Vector{I},
+    oid2lid::Vector{I};
+    kwargs...,
 ) where {T,N,I<:Integer}
     # Alias
     comm = get_comm(exchanger)
     my_part = MPI.Comm_rank(comm) + 1
 
+    # Handle kwargs
+    CSR = haskey(kwargs, :CSR) ? kwargs[:CSR] : true
+
     # Number of elements handled by each proc
     n_by_rank = MPI.Allgather(length(oid2lid), comm)
-    nrows_glob = sum(n_by_rank)
+    # nrows_glob = sum(n_by_rank)
 
     # Init Petsc if needed (should use options here)
     PetscInitialized() || PetscInitialize()
@@ -60,9 +71,18 @@ function HauntedArrays.build_cache(
     end
 
     # Build Petsc Array
-    _array = _build_petsc_array(comm, array, lid2part, oid2lid, lid2pid)
+    _array, coo_I0, coo_J0 =
+        _build_petsc_array(comm, array, lid2part, oid2lid, lid2pid, CSR)
 
-    return PetscCache(_array, PetscInt.(lid2pid), PetscInt.(oid2pid0), coo_mask, nrows_glob)
+    return PetscCache(
+        _array,
+        PetscInt.(lid2pid),
+        PetscInt.(oid2pid0),
+        CSR,
+        coo_mask,
+        coo_I0,
+        coo_J0,
+    )
 end
 
 """
@@ -96,9 +116,12 @@ function _build_petsc_array(
     lid2part,
     oid2lid,
     lid2pid,
+    ::Bool,
 ) where {T}
     n_own_rows = length(oid2lid)
-    return create_vector(comm; nrows_loc = n_own_rows, autosetup = true)
+    return create_vector(comm; nrows_loc = n_own_rows, autosetup = true),
+    PetscInt[],
+    PetscInt[]
 end
 
 function _build_petsc_array(
@@ -107,6 +130,7 @@ function _build_petsc_array(
     lid2part,
     oid2lid,
     lid2pid,
+    ::Bool,
 ) where {T}
     n_own_rows = length(oid2lid)
 
@@ -118,7 +142,9 @@ function _build_petsc_array(
         nrows_loc = n_own_rows,
         ncols_loc = n_own_rows,
         autosetup = true,
-    )
+    ),
+    PetscInt[],
+    PetscInt[]
 end
 
 function _build_petsc_array(
@@ -127,6 +153,7 @@ function _build_petsc_array(
     lid2part,
     oid2lid,
     lid2pid,
+    CSR::Bool,
 ) where {T}
     n_own_rows = length(oid2lid)
 
@@ -144,26 +171,32 @@ function _build_petsc_array(
     my_part = MPI.Comm_rank(comm) + 1
     owned_by_me = [part == my_part for part in lid2part]
 
-    #- CSR version
-    # d_nnz, o_nnz = _preallocation_from_sparse(_I, _J, owned_by_me, oid2lid, lid2pid)
-    # preallocate!(array, d_nnz, o_nnz)
+    # Ugly to allocate this here, will improve later
+    coo_I0 = PetscInt[] # 0-based
+    coo_J0 = PetscInt[] # 0-based
 
-    #- COO version
-    coo_I = PetscInt[]
-    coo_J = PetscInt[]
-    sizehint!(coo_I, length(_I))
-    sizehint!(coo_J, length(_J))
-    for (li, lj) in zip(_I, _J)
-        owned_by_me[li] || continue
-        push!(coo_I, lid2pid[li] - 1)
-        push!(coo_J, lid2pid[lj] - 1)
+    # CSR or COO preallocation
+    if CSR
+        # CSR version
+        d_nnz, o_nnz = _preallocation_from_sparse(_I, _J, owned_by_me, oid2lid, lid2pid)
+        preallocate!(array, d_nnz, o_nnz)
+    else
+        # COO version
+        sizehint!(coo_I0, length(_I))
+        sizehint!(coo_J0, length(_J))
+        for (li, lj) in zip(_I, _J)
+            owned_by_me[li] || continue
+            push!(coo_I0, lid2pid[li] - 1)
+            push!(coo_J0, lid2pid[lj] - 1)
+        end
+        setPreallocationCOO(array, length(coo_I0), coo_I0, coo_J0)
+        setOption(array, MAT_NEW_NONZERO_ALLOCATION_ERR, true)
+        @show coo_I0
+        @show coo_J0
+        @show length(coo_I0)
     end
-    setPreallocationCOO(array, length(coo_I), coo_I, coo_J)
-    @show coo_I
-    @show coo_J
-    @show length(coo_I)
 
-    return array
+    return array, coo_I0, coo_J0
 end
 
 function HauntedArrays.copy_cache(cache::PetscCache)
@@ -178,8 +211,10 @@ function HauntedArrays.copy_cache(cache::PetscCache)
         array,
         cache.lid2pid,
         cache.oid2pid0,
+        cache.CSR,
         cache.coo_mask,
-        cache.nrows_glob,
+        cache.coo_I0,
+        cache.coo_J0,
     )
 end
 
@@ -237,8 +272,11 @@ function get_updated_petsc_array(A::HauntedMatrix)
     coo_mask = cache.coo_mask
 
     # zeroEntries(B) # this should not be necessary since we fill all values
-    # v1_update!(B, A, lid2pid)
-    update!(B, A, coo_mask)
+    if cache.CSR
+        update_CSR!(B, A, lid2pid)
+    else
+        update_COO!(B, A, coo_mask)
+    end
 
     return B
 end
