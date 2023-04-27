@@ -27,7 +27,8 @@ struct PetscCache{P,I} <: HauntedArrays.AbstractCache
         o2p::Vector{PetscInt},
         CSR::Bool,
         mask::Vector{I},
-        coo_I0::Vector{PetscInt}coo_J0::Vector{PetscInt},
+        coo_I0::Vector{PetscInt},
+        coo_J0::Vector{PetscInt},
     ) where {I<:Integer}
         new{typeof(a),I}(a, l2p, o2p, CSR, mask, coo_I0, coo_J0)
     end
@@ -119,9 +120,10 @@ function _build_petsc_array(
     ::Bool,
 ) where {T}
     n_own_rows = length(oid2lid)
-    return create_vector(comm; nrows_loc = n_own_rows, autosetup = true),
-    PetscInt[],
-    PetscInt[]
+    vec = create_vector(comm; nrows_loc = n_own_rows, autosetup = true)
+    coo_I0 = PetscInt[]
+    coo_J0 = PetscInt[]
+    return vec, coo_I0, coo_J0
 end
 
 function _build_petsc_array(
@@ -137,14 +139,15 @@ function _build_petsc_array(
     # Allocate PetscMat
     # I don't why I have to set the size like this, but this is the only combination that works
     # TODO : CREATE DENSE MATRIX INSTEAD OF SPARSE WHEN NECESSARY
-    return create_matrix(
+    mat = create_matrix(
         comm;
         nrows_loc = n_own_rows,
         ncols_loc = n_own_rows,
         autosetup = true,
-    ),
-    PetscInt[],
-    PetscInt[]
+    )
+    coo_I0 = PetscInt[]
+    coo_J0 = PetscInt[]
+    return mat, coo_I0, coo_J0
 end
 
 function _build_petsc_array(
@@ -204,6 +207,11 @@ function HauntedArrays.copy_cache(cache::PetscCache)
         array = duplicate(cache.array)
     elseif cache.array isa Mat
         array = duplicate(cache.array, MAT_DO_NOT_COPY_VALUES)
+
+        # Due to a bug in PETSc, it's necessary to call again setPreallocationCOO
+        if cache.CSR == false
+            setPreallocationCOO(array, cache.coo_I0, cache.coo_J0)
+        end
     else
         error("cached array must be of type Vec or Mat")
     end
