@@ -1,3 +1,5 @@
+const DEFAULT_CSR = true # COO is not working for now
+
 struct PetscCache{P,I} <: HauntedArrays.AbstractCache
     # Petsc.Vec, Petsc.Mat or Nothing
     array::P
@@ -48,7 +50,8 @@ function HauntedArrays.build_cache(
     my_part = MPI.Comm_rank(comm) + 1
 
     # Handle kwargs
-    CSR = haskey(kwargs, :CSR) ? kwargs[:CSR] : true
+    CSR = haskey(kwargs, :CSR) ? kwargs[:CSR] : DEFAULT_CSR
+    @assert CSR "COO not working for now"
 
     # Number of elements handled by each proc
     n_by_rank = MPI.Allgather(length(oid2lid), comm)
@@ -194,9 +197,6 @@ function _build_petsc_array(
         end
         setPreallocationCOO(array, length(coo_I0), coo_I0, coo_J0)
         setOption(array, MAT_NEW_NONZERO_ALLOCATION_ERR, true)
-        @show coo_I0
-        @show coo_J0
-        @show length(coo_I0)
     end
 
     return array, coo_I0, coo_J0
