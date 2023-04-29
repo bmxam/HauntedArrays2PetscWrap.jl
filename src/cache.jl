@@ -1,38 +1,55 @@
-const DEFAULT_CSR = true # COO is not working for now
+const DEFAULT_IS_CSR = true # COO is not working for now
 
+"""
+WIP on the structure : for now I store everything I need for every solution,
+will remove a lot of stuff later
+"""
 struct PetscCache{P,I} <: HauntedArrays.AbstractCache
     # Petsc.Vec, Petsc.Mat or Nothing
     array::P
 
-    # Local to PETSc indexing
-    lid2pid::Vector{PetscInt}
-
-    # own to PETSc indexing (0-based for petsc)
-    oid2pid0::Vector{PetscInt}
-
     # Use CSR or COO? -> if we keep this, use Trait or type param
-    CSR::Bool
+    is_CSR::Bool
 
-    # Index of owned values in I, J, V (only for sparse matrices)
-    coo_mask::Vector{I}
+    # Common infos
+    lid2pid0::Vector{PetscInt} # Local to PETSc indexing (0-based)
+    oid2pid0::Vector{PetscInt} # own to PETSc indexing (0-based)
 
+    # CSR infos
+    rowptr::Vector{PetscInt} # 1-based
+    colval # (Vector or SubArray) 1-based
+    perm::Vector{I} # 1-based, permutation of `V` to use with CSR
+
+    # COO infos
+    coo_mask::Vector{I} # Index of owned values in I, J, V (only for sparse matrices)
     coo_I0::Vector{PetscInt} # 0-based
     coo_J0::Vector{PetscInt} # 0-based
 
-    # Total number of rows (= number of cols if matrix)
-    # not needed any more, to be removed
-    # nrows_glob::I
 
     function PetscCache(
         a,
-        l2p::Vector{PetscInt},
-        o2p::Vector{PetscInt},
-        CSR::Bool,
-        mask::Vector{I},
+        is_CSR::Bool,
+        lid2pid0::Vector{PetscInt},
+        oid2pid0::Vector{PetscInt},
+        rowptr::Vector{PetscInt},
+        colval::AbstractVector{I},
+        perm::Vector{I},
+        coo_mask::Vector{I},
         coo_I0::Vector{PetscInt},
         coo_J0::Vector{PetscInt},
     ) where {I<:Integer}
-        new{typeof(a),I}(a, l2p, o2p, CSR, mask, coo_I0, coo_J0)
+        new{typeof(a),I}(
+            a,
+            is_CSR,
+            lid2pid0,
+            oid2pid0,
+            rowptr,
+            colval,
+            perm,
+            coo_mask,
+            coo_I0,
+            coo_J0,
+        )
     end
 end
 
@@ -50,8 +67,8 @@ function HauntedArrays.build_cache(
     my_part = MPI.Comm_rank(comm) + 1
 
     # Handle kwargs
-    CSR = haskey(kwargs, :CSR) ? kwargs[:CSR] : DEFAULT_CSR
-    @assert CSR "COO not working for now"
+    is_CSR = haskey(kwargs, :is_CSR) ? kwargs[:is_CSR] : DEFAULT_IS_CSR
+    @assert is_CSR "COO not working for now"
 
     # Number of elements handled by each proc
     n_by_rank = MPI.Allgather(length(oid2lid), comm)
@@ -62,9 +79,20 @@ function HauntedArrays.build_cache(
 
     # Compute local to petsc numbering
     lid2pid = _compute_lid2pid(exchanger, n_by_rank, lid2gid, oid2lid)
-    oid2pid0 = lid2gid[oid2lid] .- 1 # allocation is wanted
+    lid2pid0 = PetscInt.(lid2pid .- 1)
+    oid2pid0 = lid2pid0[oid2lid] # allocation is wanted
 
-    # Compute coo mask
+    # Compute csr infos
+    if array isa AbstractSparseMatrix
+        _rowptr, colval, perm = csc_to_csr(array)
+        rowptr = PetscInt.(_rowptr)
+    else
+        rowptr = PetscInt[]
+        colval = Int[]
+        perm = Int[]
+    end
+
+    # Compute coo infos
     coo_mask = Int[]
     if array isa AbstractSparseMatrix
         _I, _, _ = findnz(array)
@@ -76,13 +104,16 @@ function HauntedArrays.build_cache(
 
     # Build Petsc Array
     _array, coo_I0, coo_J0 =
-        _build_petsc_array(comm, array, lid2part, oid2lid, lid2pid, CSR)
+        _build_petsc_array(comm, array, lid2part, oid2lid, lid2pid, is_CSR)
 
     return PetscCache(
         _array,
-        PetscInt.(lid2pid),
-        PetscInt.(oid2pid0),
-        CSR,
+        is_CSR,
+        lid2pid0,
+        oid2pid0,
+        rowptr,
+        colval,
+        perm,
         coo_mask,
         coo_I0,
         coo_J0,
@@ -159,7 +190,7 @@ function _build_petsc_array(
     lid2part,
     oid2lid,
     lid2pid,
-    CSR::Bool,
+    is_CSR::Bool,
 ) where {T}
     n_own_rows = length(oid2lid)
 
@@ -182,7 +213,7 @@ function _build_petsc_array(
     coo_J0 = PetscInt[] # 0-based
 
     # CSR or COO preallocation
-    if CSR
+    if is_CSR
         # CSR version
         d_nnz, o_nnz = _preallocation_from_sparse(_I, _J, owned_by_me, oid2lid, lid2pid)
         preallocate!(array, d_nnz, o_nnz)
@@ -209,7 +240,7 @@ function HauntedArrays.copy_cache(cache::PetscCache)
         array = duplicate(cache.array, MAT_DO_NOT_COPY_VALUES)
 
         # Due to a bug in PETSc, it's necessary to call again setPreallocationCOO
-        if cache.CSR == false
+        if cache.is_CSR == false
             setPreallocationCOO(array, cache.coo_I0, cache.coo_J0)
         end
     else
@@ -217,9 +248,12 @@ function HauntedArrays.copy_cache(cache::PetscCache)
     end
     return PetscCache(
         array,
-        cache.lid2pid,
+        cache.is_CSR,
+        cache.lid2pid0,
         cache.oid2pid0,
-        cache.CSR,
+        cache.rowptr,
+        cache.colval,
+        cache.perm,
         cache.coo_mask,
         cache.coo_I0,
         cache.coo_J0,
@@ -276,14 +310,13 @@ function get_updated_petsc_array(A::HauntedMatrix)
     end
 
     B = cache.array
-    lid2pid = cache.lid2pid
-    coo_mask = cache.coo_mask
 
     # zeroEntries(B) # this should not be necessary since we fill all values
-    if cache.CSR
-        update_CSR!(B, A, lid2pid)
+    if cache.is_CSR
+        update_CSR!(B, A, cache.lid2pid0, cache.rowptr, cache.colval, cache.perm)
+        # v1_update_CSR!(B, A, cache.lid2pid0)
     else
-        update_COO!(B, A, coo_mask)
+        update_COO!(B, A, cache.coo_mask)
     end
 
     return B
@@ -311,36 +344,3 @@ function get_petsc_array(x::HauntedArray)
     return cache.array
 end
 
-"""
-Find number of non-zeros element per diagonal block and off-diagonal block
-(see https://petsc.org/release//manualpages/Mat/MatMPIAIJSetPreallocation/)
-"""
-function _preallocation_from_sparse(I, J, owned_by_me::Vector{Bool}, oid2lid, lid2pid)
-    # Allocate
-    nrows = length(oid2lid)
-    d_nnz = zeros(Int, nrows)
-    o_nnz = zeros(Int, nrows)
-
-    iglob_min, iglob_max = extrema(view(lid2pid, oid2lid))
-
-    # Search for non-zeros
-    for (li, lj) in zip(I, J)
-        # Check that the row is handled by the local processor
-        owned_by_me[li] || continue
-
-        # Global Petsc row number
-        iglob = lid2pid[li]
-
-        # Look if the column belongs to a diagonal block or not
-        # Rq: `iglob - iglob_min + 1` and not `iloc` because the ghost
-        # dofs are not necessarily at the end, they can be any where in local
-        # numbering...
-        jglob = lid2pid[lj]
-        if (iglob_min <= jglob <= iglob_max)
-            d_nnz[iglob - iglob_min + 1] += 1
-        else
-            o_nnz[iglob - iglob_min + 1] += 1
-        end
-    end
-    return d_nnz, o_nnz
-end
