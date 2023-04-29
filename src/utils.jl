@@ -52,7 +52,7 @@ function update_COO!(
     x::HauntedArray{T,2,S},
     coo_mask::Vector{I},
 ) where {T,S<:AbstractSparseArray,I}
-    _, _, _V = findnz(parent(x))
+    _V = nonzeros(parent(x))
     setValuesCOO(y, _V[coo_mask], INSERT_VALUES)
     assemble!(y)
 end
@@ -157,7 +157,7 @@ end
 Find number of non-zeros element per diagonal block and off-diagonal block
 (see https://petsc.org/release//manualpages/Mat/MatMPIAIJSetPreallocation/)
 """
-function _preallocation_from_sparse(I, J, owned_by_me::Vector{Bool}, oid2lid, lid2pid)
+function _preallocation_CSR(I, J, owned_by_me::Vector{Bool}, oid2lid, lid2pid)
     # Allocate
     nrows = length(oid2lid)
     d_nnz = zeros(Int, nrows)
@@ -185,4 +185,17 @@ function _preallocation_from_sparse(I, J, owned_by_me::Vector{Bool}, oid2lid, li
         end
     end
     return d_nnz, o_nnz
+end
+
+function _preallocation_COO(I, J, owned_by_me::Vector{Bool}, lid2pid)
+    coo_I0 = PetscInt[]
+    coo_J0 = PetscInt[]
+    sizehint!(coo_I0, length(I))
+    sizehint!(coo_J0, length(J))
+    for (li, lj) in zip(I, J)
+        owned_by_me[li] || continue
+        push!(coo_I0, lid2pid[li] - 1)
+        push!(coo_J0, lid2pid[lj] - 1)
+    end
+    return coo_I0, coo_J0
 end

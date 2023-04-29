@@ -1,4 +1,4 @@
-const DEFAULT_IS_CSR = true # COO is not working for now
+const DEFAULT_IS_CSR = false
 
 """
 WIP on the structure : for now I store everything I need for every solution,
@@ -68,7 +68,7 @@ function HauntedArrays.build_cache(
 
     # Handle kwargs
     is_CSR = haskey(kwargs, :is_CSR) ? kwargs[:is_CSR] : DEFAULT_IS_CSR
-    @assert is_CSR "COO not working for now"
+    # @assert is_CSR "COO not working for now"
 
     # Number of elements handled by each proc
     n_by_rank = MPI.Allgather(length(oid2lid), comm)
@@ -100,6 +100,10 @@ function HauntedArrays.build_cache(
         for (k, li) in enumerate(_I)
             (lid2part[li] == my_part) && push!(coo_mask, k)
         end
+
+        # For now `coo_mask` is column-wise ordered (because coming from CSC),
+        # we need to order it row-wise for petsc
+        coo_mask .= view(coo_mask, sortperm(_I))
     end
 
     # Build Petsc Array
@@ -215,17 +219,10 @@ function _build_petsc_array(
     # CSR or COO preallocation
     if is_CSR
         # CSR version
-        d_nnz, o_nnz = _preallocation_from_sparse(_I, _J, owned_by_me, oid2lid, lid2pid)
+        d_nnz, o_nnz = _preallocation_CSR(_I, _J, owned_by_me, oid2lid, lid2pid)
         preallocate!(array, d_nnz, o_nnz)
     else
-        # COO version
-        sizehint!(coo_I0, length(_I))
-        sizehint!(coo_J0, length(_J))
-        for (li, lj) in zip(_I, _J)
-            owned_by_me[li] || continue
-            push!(coo_I0, lid2pid[li] - 1)
-            push!(coo_J0, lid2pid[lj] - 1)
-        end
+        coo_I0, coo_J0 = _preallocation_COO(_I, _J, owned_by_me, lid2pid)
         setPreallocationCOO(array, length(coo_I0), coo_I0, coo_J0)
         setOption(array, MAT_NEW_NONZERO_ALLOCATION_ERR, true)
     end
@@ -314,7 +311,6 @@ function get_updated_petsc_array(A::HauntedMatrix)
     # zeroEntries(B) # this should not be necessary since we fill all values
     if cache.is_CSR
         update_CSR!(B, A, cache.lid2pid0, cache.rowptr, cache.colval, cache.perm)
-        # v1_update_CSR!(B, A, cache.lid2pid0)
     else
         update_COO!(B, A, cache.coo_mask)
     end
