@@ -105,15 +105,13 @@ function HauntedArrays.build_cache(
     coo_mask = Int[]
     if array isa AbstractSparseMatrix
         _I, _, _ = findnz(array)
-        sizehint!(coo_mask, length(_I))
-        for (k, li) in enumerate(_I)
-            (lid2part[li] == my_part) && push!(coo_mask, k)
-        end
-        pprintln(lid2part)
-        pprintln(coo_mask)
+        coo_mask = findall(li -> lid2part[li] == my_part, _I)
         # For now `coo_mask` is column-wise ordered (because coming from CSC),
         # we need to order it row-wise for petsc
-        coo_mask .= view(coo_mask, sortperm(_I))
+        coo_mask = coo_mask[sortperm(_I[coo_mask])]
+        # coo_mask .= view(coo_mask, sortperm(view(_I, coo_mask))) # should work, but need to be validated
+        pprintln(lid2part)
+        pprintln(coo_mask)
     end
 
     pprintln("build_cache 3")
