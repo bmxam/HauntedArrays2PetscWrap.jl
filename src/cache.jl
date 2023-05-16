@@ -82,12 +82,8 @@ function HauntedArrays.build_cache(
 
     # Compute local to petsc numbering
     lid2pid = _compute_lid2pid(exchanger, n_by_rank, lid2gid, oid2lid)
-    @show typeof(lid2pid)
-    pprintln("extrema(lid2pid) = $(extrema(lid2pid))")
     lid2pid0 = PetscInt.(lid2pid .- 1)
     oid2pid0 = lid2pid0[oid2lid] # allocation is wanted
-
-    pprintln("build_cache 1")
 
     # Compute csr infos
     if array isa AbstractSparseMatrix
@@ -99,8 +95,6 @@ function HauntedArrays.build_cache(
         perm = Int[]
     end
 
-    pprintln("build_cache 2")
-
     # Compute coo infos
     coo_mask = Int[]
     if array isa AbstractSparseMatrix
@@ -110,17 +104,11 @@ function HauntedArrays.build_cache(
         # we need to order it row-wise for petsc
         coo_mask = coo_mask[sortperm(_I[coo_mask])]
         # coo_mask .= view(coo_mask, sortperm(view(_I, coo_mask))) # should work, but need to be validated
-        pprintln(lid2part)
-        pprintln(coo_mask)
     end
-
-    pprintln("build_cache 3")
 
     # Build Petsc Array
     _array, coo_I0, coo_J0 =
         _build_petsc_array(comm, array, lid2part, oid2lid, lid2pid, is_CSR)
-
-    pprintln("build_cache 4")
 
     return PetscCache(
         _array,
@@ -170,9 +158,7 @@ function _build_petsc_array(
     ::Bool,
 ) where {T}
     n_own_rows = length(oid2lid)
-    pprintln("before create_vecn n_own_rows = $n_own_rows")
     vec = create_vector(comm; nrows_loc = n_own_rows, autosetup = true)
-    pprintln("after create_vec")
     coo_I0 = PetscInt[]
     coo_J0 = PetscInt[]
     return vec, coo_I0, coo_J0
@@ -191,14 +177,12 @@ function _build_petsc_array(
     # Allocate PetscMat
     # I don't why I have to set the size like this, but this is the only combination that works
     # TODO : CREATE DENSE MATRIX INSTEAD OF SPARSE WHEN NECESSARY
-    pprintln("before create_matrix dense")
     mat = create_matrix(
         comm;
         nrows_loc = n_own_rows,
         ncols_loc = n_own_rows,
         autosetup = true,
     )
-    pprintln("after create_matrix dense")
     coo_I0 = PetscInt[]
     coo_J0 = PetscInt[]
     return mat, coo_I0, coo_J0
@@ -216,14 +200,12 @@ function _build_petsc_array(
 
     # Allocate PetscMat
     # I don't why I have to set the size like this, but this is the only combination that works
-    pprintln("before create_matrix sparse")
     array = create_matrix(
         comm;
         nrows_loc = n_own_rows,
         ncols_loc = n_own_rows,
         autosetup = true,
     )
-    pprintln("after create_vec")
 
     # Set exact preallocation
     _I, _J, _ = findnz(A)
@@ -235,7 +217,6 @@ function _build_petsc_array(
     coo_J0 = PetscInt[] # 0-based
 
     # CSR or COO preallocation
-    pprintln("before prealloc")
     if is_CSR
         # CSR version
         d_nnz, o_nnz = _preallocation_CSR(_I, _J, owned_by_me, oid2lid, lid2pid)
@@ -245,7 +226,6 @@ function _build_petsc_array(
         setPreallocationCOO(array, length(coo_I0), coo_I0, coo_J0)
         setOption(array, MAT_NEW_NONZERO_ALLOCATION_ERR, true)
     end
-    pprintln("after prealloc")
 
     return array, coo_I0, coo_J0
 end
