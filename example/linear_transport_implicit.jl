@@ -93,7 +93,7 @@ function run_impl_sparse()
 end
 
 run_expl()
-run_impl_dense()
+# run_impl_dense()
 run_impl_sparse()
 
 end

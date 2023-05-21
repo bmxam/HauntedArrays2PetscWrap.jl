@@ -1,10 +1,10 @@
-const DEFAULT_IS_CSR = false
+const DEFAULT_IS_CSR = false # true -> CSR, false -> COO
 
 """
 WIP on the structure : for now I store everything I need for every solution,
 will remove a lot of stuff later
 """
-struct PetscCache{P,I} <: HauntedArrays.AbstractCache
+struct PetscCache{P,I,C} <: HauntedArrays.AbstractCache
     # Petsc.Vec, Petsc.Mat or Nothing
     array::P
 
@@ -17,7 +17,7 @@ struct PetscCache{P,I} <: HauntedArrays.AbstractCache
 
     # CSR infos
     rowptr::Vector{PetscInt} # 1-based
-    colval # (Vector or SubArray) 1-based
+    colval::C # (Vector or SubArray) 1-based
     perm::Vector{I} # 1-based, permutation of `V` to use with CSR
 
     # COO infos
@@ -38,7 +38,7 @@ struct PetscCache{P,I} <: HauntedArrays.AbstractCache
         coo_I0::Vector{PetscInt},
         coo_J0::Vector{PetscInt},
     ) where {I<:Integer}
-        new{typeof(a),I}(
+        new{typeof(a),I,typeof(colval)}(
             a,
             is_CSR,
             lid2pid0,
@@ -68,7 +68,9 @@ function HauntedArrays.build_cache(
 
     # Handle kwargs
     is_CSR = haskey(kwargs, :is_CSR) ? kwargs[:is_CSR] : DEFAULT_IS_CSR
-    # @assert is_CSR "COO not working for now"
+
+    # COO is not handled for non-sparse arrays yet
+    (array isa Matrix) && (is_CSR = true)
 
     # Number of elements handled by each proc
     n_by_rank = MPI.Allgather(length(oid2lid), comm)
@@ -177,12 +179,15 @@ function _build_petsc_array(
     # Allocate PetscMat
     # I don't why I have to set the size like this, but this is the only combination that works
     # TODO : CREATE DENSE MATRIX INSTEAD OF SPARSE WHEN NECESSARY
-    mat = create_matrix(
-        comm;
-        nrows_loc = n_own_rows,
-        ncols_loc = n_own_rows,
-        autosetup = true,
-    )
+    # mat = create_matrix(
+    #     comm;
+    #     nrows_loc = n_own_rows,
+    #     ncols_loc = n_own_rows,
+    #     autosetup = true,
+    # )
+    mat = createDense(comm, n_own_rows, n_own_rows, PETSC_DECIDE, PETSC_DECIDE)
+    set_from_options!(mat)
+    set_up!(mat)
     coo_I0 = PetscInt[]
     coo_J0 = PetscInt[]
     return mat, coo_I0, coo_J0

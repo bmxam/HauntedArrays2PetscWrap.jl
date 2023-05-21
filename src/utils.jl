@@ -36,13 +36,25 @@ function update!(y::Vec, x::HauntedVector, oid2pid0::Vector{PetscInt})
     assemble!(y)
 end
 
-function update!(y::Mat, x::HauntedArray{T,2,S}, lid2pid0) where {T,S<:Matrix}
+function update_CSR!(
+    y::Mat,
+    x::HauntedArray{T,2,S},
+    lid2pid0::Vector{PetscInt},
+    rowptr::Vector{PetscInt},
+    colval,
+    perm,
+) where {T,S<:Matrix}
     # WARNING : not optimized
     _x = parent(x)
     ncols_l = size(_x, 2)
     _ones = ones(ncols_l)
     for li in own_to_local_rows(x)
-        setValues(y, lid2pid0[li] .* _ones, lid2pid0, _x[li, :], INSERT_VALUES)
+        # below is not working anymore for some obscur reason
+        # setValues(y, lid2pid0[li] .* _ones, lid2pid0, _x[li, :], INSERT_VALUES)
+
+        for lj = 1:ncols_l
+            setValue(y, lid2pid0[li], lid2pid0[lj], _x[li, lj], INSERT_VALUES)
+        end
     end
     assemble!(y)
 end
