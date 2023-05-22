@@ -28,7 +28,7 @@ mypart = rank + 1
 lid2gid, lid2part = HauntedArrays.generate_1d_partitioning(nx, mypart, np)
 
 # Allocate
-p = (c = c, Δx = Δx, α = α)
+p = (c = c, Δx = Δx, α = α, counter = Int[1])
 
 function f!(dq, q, p, t)
     # Loop on own dofs
@@ -52,6 +52,14 @@ cb_update = DiscreteCallback(
     end;
     save_positions = (false, false),
 )
+cb_info = DiscreteCallback(
+    always_true,
+    integrator -> begin
+        @only_root println("iter = ", integrator.p.counter[1], " dt = ", integrator.dt)
+        integrator.p.counter .+= 1
+    end;
+    save_positions = (false, false),
+)
 
 
 function run_expl()
@@ -69,7 +77,7 @@ function run_impl_dense()
     prob = ODEProblem(f!, q, tspan, p)
     timestepper = ImplicitEuler(linsolve = PetscFactorization())
     @only_root println("running solve (implicit dense)...")
-    sol = solve(prob, timestepper; callback = CallbackSet(cb_update))
+    sol = solve(prob, timestepper; callback = CallbackSet(cb_update, cb_info))
     q = sol.u[end]
     @one_at_a_time @show owned_values(q)
 end
@@ -92,8 +100,8 @@ function run_impl_sparse()
     @one_at_a_time @show owned_values(q)
 end
 
-run_expl()
-# run_impl_dense()
-run_impl_sparse()
+# run_expl()
+run_impl_dense()
+# run_impl_sparse()
 
 end
