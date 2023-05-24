@@ -84,7 +84,7 @@ function run_impl_dense()
     prob = ODEProblem(f!, q, tspan, p)
     timestepper = ImplicitEuler(linsolve = PetscFactorization())
     @only_root println("running solve (implicit dense)...")
-    sol = solve(prob, timestepper; callback = CallbackSet(cb_update, cb_info))
+    sol = solve(prob, timestepper; callback = CallbackSet(cb_update))
     q = sol.u[end]
     @one_at_a_time @show owned_values(q)
 end
@@ -107,8 +107,8 @@ function run_impl_sparse()
     @one_at_a_time @show owned_values(q)
 end
 
-# run_expl()
-# run_impl_dense()
+run_expl()
+run_impl_dense()
 run_impl_sparse()
 
 end
