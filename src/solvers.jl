@@ -17,8 +17,9 @@ function LinearSolve.init_cacheval(
     verbose::Bool,
     assumptions::LinearSolve.OperatorAssumptions,
 )
-    # here A and b are random (even null), this is just to allocate the cache. So we just need to create a ksp without
-    # calling `setup` otherwise the PETSc factorization is triggered (leading to a zero pivot)
+    # here A and b are random (even null), this is just to allocate the cache. So we just
+    # need to create a ksp without calling `setup` otherwise the PETSc factorization is
+    # triggered (leading to a zero pivot)
     # Note : we could even just return an empty KSP...
     _A = get_updated_petsc_array(A)
     return create_ksp(_A; autosetup = false)

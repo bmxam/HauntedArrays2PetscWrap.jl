@@ -55,7 +55,14 @@ cb_update = DiscreteCallback(
 cb_info = DiscreteCallback(
     always_true,
     integrator -> begin
-        @only_root println("iter = ", integrator.p.counter[1], " dt = ", integrator.dt)
+        @only_root println(
+            "iter = ",
+            integrator.p.counter[1],
+            ", dt = ",
+            integrator.dt,
+            ", t = ",
+            integrator.t,
+        )
         integrator.p.counter .+= 1
     end;
     save_positions = (false, false),
@@ -88,7 +95,7 @@ function run_impl_sparse()
     output = similar(q)
     _f! = (y, x) -> f!(y, x, p, 0.0)
     sparsity_pattern = Symbolics.jacobian_sparsity(_f!, output, input)
-    jac = HauntedMatrix(Float64.(sparsity_pattern), q)
+    jac = HauntedMatrix(Float64.(sparsity_pattern) + I, q) # +I to ensure diagonal is set
     colors = matrix_colors(jac)
 
     ode = ODEFunction(f!; jac_prototype = jac, colorvec = colors)
@@ -101,7 +108,7 @@ function run_impl_sparse()
 end
 
 # run_expl()
-run_impl_dense()
-# run_impl_sparse()
+# run_impl_dense()
+run_impl_sparse()
 
 end

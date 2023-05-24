@@ -24,6 +24,12 @@ struct PetscCache{P,I,C} <: HauntedArrays.AbstractCache
     coo_mask::Vector{I} # Index of owned values in I, J, V (only for sparse matrices)
     coo_I0::Vector{PetscInt} # 0-based
     coo_J0::Vector{PetscInt} # 0-based
+    # Rq : it is necessary to store coo_I0 and coo_J0 due to a bug in Petsc : when
+    # duplicating the matrix, the COO information is lost so we have to call
+    # again `setPreallocationCOO`
+
+    # For debug purpose
+    nnz::Int # number of nonzero values in SparseArray
 
 
     function PetscCache(
@@ -37,6 +43,7 @@ struct PetscCache{P,I,C} <: HauntedArrays.AbstractCache
         coo_mask::Vector{I},
         coo_I0::Vector{PetscInt},
         coo_J0::Vector{PetscInt},
+        nnz::Int,
     ) where {I<:Integer}
         new{typeof(a),I,typeof(colval)}(
             a,
@@ -49,6 +56,7 @@ struct PetscCache{P,I,C} <: HauntedArrays.AbstractCache
             coo_mask,
             coo_I0,
             coo_J0,
+            nnz,
         )
     end
 end
@@ -99,13 +107,18 @@ function HauntedArrays.build_cache(
 
     # Compute coo infos
     coo_mask = Int[]
+    nnz = 0
     if array isa AbstractSparseMatrix
         _I, _, _ = findnz(array)
         coo_mask = findall(li -> lid2part[li] == my_part, _I)
         # For now `coo_mask` is column-wise ordered (because coming from CSC),
         # we need to order it row-wise for petsc
-        coo_mask = coo_mask[sortperm(_I[coo_mask])]
+        # ---> 24/05/23 : according to the doc, coo_mask must follow the same order as (coo_I0, coo_J0)
+        # so no further permutation is needed
+        # coo_mask = coo_mask[sortperm(_I[coo_mask])]
         # coo_mask .= view(coo_mask, sortperm(view(_I, coo_mask))) # should work, but need to be validated
+
+        nnz = length(_I)
     end
 
     # Build Petsc Array
@@ -123,6 +136,7 @@ function HauntedArrays.build_cache(
         coo_mask,
         coo_I0,
         coo_J0,
+        nnz,
     )
 end
 
@@ -228,7 +242,9 @@ function _build_petsc_array(
         preallocate!(array, d_nnz, o_nnz)
     else
         coo_I0, coo_J0 = _preallocation_COO(_I, _J, owned_by_me, lid2pid)
-        setPreallocationCOO(array, length(coo_I0), coo_I0, coo_J0)
+
+        # Using `copy` is important because `setPreallocationCOO` modifies the array
+        setPreallocationCOO(array, length(coo_I0), copy(coo_I0), copy(coo_J0))
         setOption(array, MAT_NEW_NONZERO_ALLOCATION_ERR, true)
     end
 
@@ -259,6 +275,7 @@ function HauntedArrays.copy_cache(cache::PetscCache)
         cache.coo_mask,
         cache.coo_I0,
         cache.coo_J0,
+        cache.nnz,
     )
 end
 

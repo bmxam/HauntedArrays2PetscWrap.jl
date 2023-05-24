@@ -65,6 +65,10 @@ function update_COO!(
     coo_mask::Vector{I},
 ) where {T,S<:AbstractSparseArray,I}
     _V = nonzeros(parent(x))
+
+    # Safety check to detect modification of the sparsity pattern
+    @assert get_cache(x).nnz == length(_V) "Sparsity pattern has changed"
+
     setValuesCOO(y, _V[coo_mask], INSERT_VALUES)
     assemble!(y)
 end
