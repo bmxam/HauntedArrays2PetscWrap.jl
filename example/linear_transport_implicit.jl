@@ -28,7 +28,7 @@ mypart = rank + 1
 lid2gid, lid2part = HauntedArrays.generate_1d_partitioning(nx, mypart, np)
 
 # Allocate
-p = (c = c, Δx = Δx, α = α)
+p = (c = c, Δx = Δx, α = α, counter = Int[1])
 
 function f!(dq, q, p, t)
     # Loop on own dofs
@@ -49,6 +49,21 @@ cb_update = DiscreteCallback(
     always_true,
     integrator -> begin
         update_ghosts!(integrator.u)
+    end;
+    save_positions = (false, false),
+)
+cb_info = DiscreteCallback(
+    always_true,
+    integrator -> begin
+        @only_root println(
+            "iter = ",
+            integrator.p.counter[1],
+            ", dt = ",
+            integrator.dt,
+            ", t = ",
+            integrator.t,
+        )
+        integrator.p.counter .+= 1
     end;
     save_positions = (false, false),
 )
@@ -80,7 +95,7 @@ function run_impl_sparse()
     output = similar(q)
     _f! = (y, x) -> f!(y, x, p, 0.0)
     sparsity_pattern = Symbolics.jacobian_sparsity(_f!, output, input)
-    jac = HauntedMatrix(Float64.(sparsity_pattern), q)
+    jac = HauntedMatrix(Float64.(sparsity_pattern) + I, q) # +I to ensure diagonal is set
     colors = matrix_colors(jac)
 
     ode = ODEFunction(f!; jac_prototype = jac, colorvec = colors)

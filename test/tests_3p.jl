@@ -21,10 +21,6 @@ function test1()
     nx = 2
     lid2gid, lid2part = HauntedArrays.generate_1d_partitioning(nx, mypart, np, true, rng)
 
-    @one_at_a_time begin
-        @show lid2gid
-        @show lid2part
-    end
     x = HauntedVector(comm, lid2gid, lid2part; cacheType = PetscCache)
     x .= rand(length(lid2gid))
 
