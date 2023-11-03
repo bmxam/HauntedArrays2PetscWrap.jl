@@ -22,12 +22,12 @@ function LinearSolve.init_cacheval(
     # triggered (leading to a zero pivot)
     # Note : we could even just return an empty KSP...
     _A = get_updated_petsc_array(A)
-    return create_ksp(_A; autosetup = false)
+    return create_ksp(_A; autosetup = false, add_finalizer = false)
 end
 
 function LinearSolve.do_factorization(::PetscFactorization, A, b, u)
     _A = get_updated_petsc_array(A)
-    return create_ksp(_A; autosetup = true)
+    return create_ksp(_A; autosetup = true, add_finalizer = false)
 end
 
 # function SciMLBase.solve(cache::LinearSolve.LinearCache, alg::PetscFactorization; kwargs...)
