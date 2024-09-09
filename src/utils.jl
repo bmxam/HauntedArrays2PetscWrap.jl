@@ -22,6 +22,7 @@ function update!(y::HauntedVector, x::Vec)
 end
 
 """
+    update!(y::Vec, x::HauntedVector)
     update!(y::Vec, x::HauntedVector, oid2pid0::Vector{PetscInt})
     update!(y::Mat, x::HauntedArray{T,2,S}, lid2pid) where {T,S<:Matrix}
 
@@ -31,6 +32,12 @@ Update Petsc Vec with values of HauntedArray
 
 Benchmarked as the fastest solution to achieve this.
 """
+function update!(y::Vec, x::HauntedVector)
+    cache = get_cache(x)
+    @assert cache isa PetscCache "HauntedVector must be equipped with a PetscCache to use this function"
+    update!(y, x, cache.oid2pid0)
+end
+
 function update!(y::Vec, x::HauntedVector, oid2pid0::Vector{PetscInt})
     setValues(y, oid2pid0, owned_values(x), INSERT_VALUES)
     assemble!(y)

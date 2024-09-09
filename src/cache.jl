@@ -199,7 +199,13 @@ function _build_petsc_array(
     #     ncols_loc = n_own_rows,
     #     autosetup = true,
     # )
-    mat = createDense(comm, n_own_rows, n_own_rows, PETSC_DECIDE, PETSC_DECIDE)
+    mat = createDense(
+        comm,
+        PetscInt(n_own_rows),
+        PetscInt(n_own_rows),
+        PETSC_DECIDE,
+        PETSC_DECIDE,
+    )
     set_from_options!(mat)
     set_up!(mat)
     coo_I0 = PetscInt[]
