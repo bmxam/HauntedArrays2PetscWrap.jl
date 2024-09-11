@@ -1,8 +1,11 @@
+"""
+In the future, if needed : replace all attributes by a Dict
+"""
 struct PetscFactorization <: LinearSolve.AbstractFactorization
-    options
-
-    PetscFactorization(options = Dict()) = new(options)
+    ksp_finalizer::Bool
 end
+
+PetscFactorization(; ksp_finalizer = false) = PetscFactorization(ksp_finalizer)
 
 function LinearSolve.init_cacheval(
     alg::PetscFactorization,
@@ -22,12 +25,12 @@ function LinearSolve.init_cacheval(
     # triggered (leading to a zero pivot)
     # Note : we could even just return an empty KSP...
     _A = get_updated_petsc_array(A)
-    return create_ksp(_A; autosetup = false, add_finalizer = false)
+    return create_ksp(_A; autosetup = false, add_finalizer = alg.ksp_finalizer)
 end
 
-function LinearSolve.do_factorization(::PetscFactorization, A, b, u)
+function LinearSolve.do_factorization(alg::PetscFactorization, A, b, u)
     _A = get_updated_petsc_array(A)
-    return create_ksp(_A; autosetup = true, add_finalizer = false)
+    return create_ksp(_A; autosetup = true, add_finalizer = alg.ksp_finalizer)
 end
 
 # function SciMLBase.solve(cache::LinearSolve.LinearCache, alg::PetscFactorization; kwargs...)
