@@ -1,7 +1,7 @@
 name = "HauntedArrays2PetscWrap"
 uuid = "5aa179f6-1a8e-402c-b434-5ad6c0ea8643"
 authors = ["bmxam <maxime.bouyges@gmail.com>"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
